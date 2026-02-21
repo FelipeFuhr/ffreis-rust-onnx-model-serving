@@ -1051,6 +1051,7 @@ mod tests {
     use crate::grpc::inference_service_server::InferenceService;
     use axum::body::Bytes;
     use axum::http::HeaderValue;
+    use proptest::prelude::*;
     use std::fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -1428,6 +1429,38 @@ mod tests {
             .parse_payload(payload, "application/json")
             .expect_err("missing key should fail");
         assert!(err.contains("Missing key 'b'"));
+    }
+
+    proptest! {
+        #[test]
+        fn property_parse_payload_json_preserves_shape(
+            rows in proptest::collection::vec(
+                proptest::collection::vec(-1000i16..1000i16, 1..8),
+                1..24
+            )
+        ) {
+            let cfg = AppConfig::default();
+            let state = AppState::new(cfg);
+            let instances: Vec<Vec<f64>> = rows
+                .iter()
+                .map(|row| row.iter().map(|value| f64::from(*value)).collect())
+                .collect();
+            let payload = serde_json::to_vec(&json!({"instances": instances}))
+                .expect("json payload");
+
+            let parsed = state
+                .parse_payload(payload.as_slice(), "application/json")
+                .expect("json parse should pass");
+
+            let parsed_rows = parsed.x.expect("tabular rows expected");
+            prop_assert_eq!(parsed_rows.len(), instances.len());
+            for (parsed_row, input_row) in parsed_rows.iter().zip(instances.iter()) {
+                prop_assert_eq!(parsed_row.len(), input_row.len());
+                for (parsed_value, input_value) in parsed_row.iter().zip(input_row.iter()) {
+                    prop_assert!((parsed_value - input_value).abs() < 1e-12);
+                }
+            }
+        }
     }
 
     #[test]

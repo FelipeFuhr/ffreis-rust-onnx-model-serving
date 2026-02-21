@@ -167,6 +167,10 @@ clippy: ## Run clippy lints
 test: ## Run tests
 	$(MAKE) -C app test
 
+.PHONY: test-property
+test-property: ## Run property-based tests (proptest)
+	$(MAKE) -C app test-property
+
 .PHONY: grpc-check
 grpc-check: ## Verify protobuf/gRPC contract compiles
 	$(MAKE) -C app grpc-check

@@ -1,0 +1,49 @@
+name: Property Parity
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "app/src/lib.rs"
+      - "app/Cargo.toml"
+      - "app/Makefile"
+      - "Makefile"
+      - ".github/workflows/property-parity.yml"
+  schedule:
+    - cron: "0 11 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  proptest-parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      matrix:
+        profile: [pr, nightly]
+    if: ${{ github.event_name != 'pull_request' || matrix.profile == 'pr' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
+
+      - name: Run proptest parity checks
+        env:
+          PROPTEST_CASES: ${{ matrix.profile == 'nightly' && '180' || '40' }}
+        run: |
+          set -euo pipefail
+          make test-property
+
+      - name: Upload proptest regressions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proptest-regressions-${{ matrix.profile }}-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: app/proptest-regressions/

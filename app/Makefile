@@ -74,6 +74,14 @@ test-unit: ## Run unit tests only (src/*)
 test-integration: ## Run integration tests only (tests/integration/*)
 	$(CARGO) test --test integration_tests --verbose
 
+.PHONY: test-property
+test-property: ## Run property-based tests (proptest) in unit test module
+	@if [ -n "$(PROPTEST_CASES)" ]; then \
+		PROPTEST_CASES="$(PROPTEST_CASES)" $(CARGO) test --lib property_ --verbose; \
+	else \
+		$(CARGO) test --lib property_ --verbose; \
+	fi
+
 .PHONY: test-e2e
 test-e2e: ## Run e2e/ML scaffold tests (ignored tests are not run by default)
 	$(CARGO) test --test e2e_tests --verbose

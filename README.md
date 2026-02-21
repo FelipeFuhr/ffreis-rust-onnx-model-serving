@@ -29,6 +29,8 @@ OpenAPI transport contract:
 
 Proto: `app/proto/onnx_serving_grpc/inference.proto`
 
+gRPC server reflection is intentionally not enabled in runtime paths.
+
 - `Live(LiveRequest) -> StatusReply`
 - `Ready(ReadyRequest) -> StatusReply`
 - `Predict(PredictRequest) -> PredictReply`

@@ -12,3 +12,13 @@ rustfmt.toml.bak
 # Python cache artifacts (examples/scripts)
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hypothesis/
+.tox/
+.nox/
+.venv/
+venv/
+env/
+**/__pycache__/
