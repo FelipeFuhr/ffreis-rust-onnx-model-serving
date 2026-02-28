@@ -10,6 +10,8 @@ services:
       PORT: "8080"
     ports:
       - "18080:8080"
+    volumes:
+      - ../app/tests/fixtures:/opt/ml/model:ro
 
   serving-grpc:
     image: ${IMAGE_ROOT:-ffreis}-rust-onnx-model-serving:${IMAGE_TAG:-api-grpc-smoke}
@@ -19,6 +21,8 @@ services:
       PORT: "50052"
     ports:
       - "15052:50052"
+    volumes:
+      - ../app/tests/fixtures:/opt/ml/model:ro
 
   smoke:
     image: python:3.13-slim
