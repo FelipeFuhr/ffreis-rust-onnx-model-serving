@@ -431,6 +431,7 @@ impl AppState {
             return Ok((bytes, "application/json".to_string()));
         }
 
+        // skipcq: RS-W1031. Clippy enforces unwrap_or here because the fallback is a cheap borrowed &str.
         let normalized_accept = accept
             .split(',')
             .next()
@@ -708,7 +709,7 @@ fn format_csv_predictions(predictions: &Value, delimiter: &str) -> Result<String
 
 fn value_to_string(value: &Value) -> String {
     match value {
-        Value::Null => String::new(),
+        Value::Null => String::default(),
         Value::Bool(v) => v.to_string(),
         Value::Number(v) => v.to_string(),
         Value::String(v) => v.clone(),

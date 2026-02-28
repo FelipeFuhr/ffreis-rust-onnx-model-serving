@@ -13,7 +13,7 @@ tokio = { version = "1.47.1", features = ["full"] }
 tokio-stream = { version = "0.1.17", features = ["net"] }
 tonic = { version = "0.12.3", features = ["transport"] }
 tract-onnx = "0.21.13"
-uuid = { version = "1.18.1", features = ["v4"] }
+uuid = { version = "=1.18.1", features = ["v4"] }
 
 [build-dependencies]
 protoc-bin-vendored = "3.2.0"
@@ -22,4 +22,4 @@ tonic-build = "0.12.3"
 [dev-dependencies]
 proptest = "1.6.0"
 reqwest = { version = "0.12.23", default-features = false, features = ["blocking", "json", "rustls-tls"] }
-tempfile = "3.23.0"
+tempfile = "=3.23.0"
