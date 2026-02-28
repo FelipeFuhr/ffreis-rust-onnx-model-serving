@@ -62,9 +62,26 @@ jobs:
           make -C app coverage
           test -s coverage/cobertura.xml
 
+      - name: Check Codecov token availability
+        id: codecov_gate
+        run: |
+          set -euo pipefail
+          if [[ -z "${{ secrets.CODECOV_TOKEN }}" ]]; then
+            if [[ "${{ github.event_name }}" == "push" ]]; then
+              echo "::error::CODECOV_TOKEN secret is required for push coverage uploads."
+              exit 1
+            fi
+            echo "CODECOV_TOKEN not available (likely fork PR); skipping upload."
+            echo "skip_upload=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip_upload=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload coverage to Codecov
+        if: steps.codecov_gate.outputs.skip_upload != 'true'
         uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage/cobertura.xml
           fail_ci_if_error: true
           verbose: true
