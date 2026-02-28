@@ -73,7 +73,11 @@ def _assert_http(api_base: str) -> None:
     if status != 200:
         raise RuntimeError(f"unexpected status from /invocations: {status}")
     payload = json.loads(body.decode("utf-8"))
-    assert payload.get("predictions") == [0, 0], payload
+    if isinstance(payload, dict):
+        predictions = payload.get("predictions")
+    else:
+        predictions = payload
+    assert predictions == [0, 0], payload
 
 
 def _assert_grpc(target: str) -> None:
