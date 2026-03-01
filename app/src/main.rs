@@ -53,11 +53,44 @@ where
     Ok(())
 }
 
-async fn run() -> Result<(), String> {
+async fn run_from_env<InitFn, HttpFn, GrpcFn, HttpFut, GrpcFut, HttpErr, GrpcErr>(
+    cfg: AppConfig,
+    init: InitFn,
+    http_runner: HttpFn,
+    grpc_runner: GrpcFn,
+) -> Result<(), String>
+where
+    InitFn: Fn(&AppConfig) -> Result<(), String>,
+    HttpFn: Fn(String, u16, AppConfig) -> HttpFut,
+    GrpcFn: Fn(String, u16, AppConfig) -> GrpcFut,
+    HttpFut: Future<Output = Result<(), HttpErr>>,
+    GrpcFut: Future<Output = Result<(), GrpcErr>>,
+    HttpErr: Display,
+    GrpcErr: Display,
+{
+    let (mode_raw, host_raw, port_raw) = runtime_env_values();
     run_with(
+        mode_raw,
+        host_raw,
+        port_raw,
+        cfg,
+        init,
+        http_runner,
+        grpc_runner,
+    )
+    .await
+}
+
+fn runtime_env_values() -> (Option<String>, Option<String>, Option<String>) {
+    (
         env::var(SERVE_MODE_ENV_KEY).ok(),
         env::var(HOST_ENV_KEY).ok(),
         env::var(PORT_ENV_KEY).ok(),
+    )
+}
+
+async fn run() -> Result<(), String> {
+    run_from_env(
         AppConfig::default(),
         init_telemetry,
         |host, port, cfg| async move { run_http_server(&host, port, cfg).await },
@@ -77,11 +110,52 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::resolve_runtime_settings;
+    use super::run_from_env;
     use super::run_with;
+    use super::runtime_env_values;
+    use super::HOST_ENV_KEY;
+    use super::PORT_ENV_KEY;
+    use super::SERVE_MODE_ENV_KEY;
     use app::AppConfig;
+    use std::env;
     use std::io;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = env::var(key).ok();
+            env::set_var(key, value);
+            Self { key, previous }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let previous = env::var(key).ok();
+            env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                env::set_var(self.key, previous);
+            } else {
+                env::remove_var(self.key);
+            }
+        }
+    }
 
     #[test]
     fn resolve_runtime_settings_defaults_to_http() {
@@ -229,5 +303,124 @@ mod tests {
 
         let error = result.expect_err("http error expected");
         assert!(error.contains("http server failed"));
+    }
+
+    #[test]
+    fn runtime_env_values_reads_present_variables() {
+        let _lock = env_lock().lock().expect("env lock");
+        let _mode = EnvVarGuard::set(SERVE_MODE_ENV_KEY, "grpc");
+        let _host = EnvVarGuard::set(HOST_ENV_KEY, "10.0.0.1");
+        let _port = EnvVarGuard::set(PORT_ENV_KEY, "9000");
+
+        let (mode, host, port) = runtime_env_values();
+        assert_eq!(mode.as_deref(), Some("grpc"));
+        assert_eq!(host.as_deref(), Some("10.0.0.1"));
+        assert_eq!(port.as_deref(), Some("9000"));
+    }
+
+    #[tokio::test]
+    async fn run_with_returns_grpc_server_error() {
+        let cfg = AppConfig::default();
+        let result = run_with(
+            Some("grpc".to_string()),
+            None,
+            None,
+            cfg,
+            |_| Ok(()),
+            |_, _, _| async { Ok::<(), io::Error>(()) },
+            |_, _, _| async { Err(io::Error::other("grpc bind failed")) },
+        )
+        .await;
+
+        let error = result.expect_err("grpc error expected");
+        assert!(error.contains("grpc server failed"));
+    }
+
+    #[test]
+    fn run_from_env_uses_grpc_settings_from_environment() {
+        let _lock = env_lock().lock().expect("env lock");
+        let _mode = EnvVarGuard::set(SERVE_MODE_ENV_KEY, "grpc");
+        let _host = EnvVarGuard::set(HOST_ENV_KEY, "127.0.0.1");
+        let _port = EnvVarGuard::set(PORT_ENV_KEY, "50099");
+        let http_calls = Arc::new(AtomicUsize::new(0));
+        let grpc_calls = Arc::new(AtomicUsize::new(0));
+        let grpc_host = Arc::new(Mutex::new(String::new()));
+        let grpc_port = Arc::new(AtomicUsize::new(0));
+        let http_calls_ref = http_calls.clone();
+        let grpc_calls_ref = grpc_calls.clone();
+        let grpc_host_ref = grpc_host.clone();
+        let grpc_port_ref = grpc_port.clone();
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        let result = rt.block_on(run_from_env(
+            AppConfig::default(),
+            |_| Ok(()),
+            move |_, _, _| {
+                http_calls_ref.fetch_add(1, Ordering::SeqCst);
+                async { Ok::<(), io::Error>(()) }
+            },
+            move |host, port, _| {
+                grpc_calls_ref.fetch_add(1, Ordering::SeqCst);
+                *grpc_host_ref.lock().expect("grpc host lock") = host;
+                grpc_port_ref.store(usize::from(port), Ordering::SeqCst);
+                async { Ok::<(), io::Error>(()) }
+            },
+        ));
+
+        assert!(result.is_ok());
+        assert_eq!(http_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(grpc_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            grpc_host.lock().expect("grpc host read").as_str(),
+            "127.0.0.1"
+        );
+        assert_eq!(grpc_port.load(Ordering::SeqCst), 50099);
+    }
+
+    #[test]
+    fn run_from_env_defaults_to_http_when_env_is_absent() {
+        let _lock = env_lock().lock().expect("env lock");
+        let _mode = EnvVarGuard::remove(SERVE_MODE_ENV_KEY);
+        let _host = EnvVarGuard::remove(HOST_ENV_KEY);
+        let _port = EnvVarGuard::remove(PORT_ENV_KEY);
+        let http_calls = Arc::new(AtomicUsize::new(0));
+        let grpc_calls = Arc::new(AtomicUsize::new(0));
+        let http_host = Arc::new(Mutex::new(String::new()));
+        let http_port = Arc::new(AtomicUsize::new(0));
+        let http_calls_ref = http_calls.clone();
+        let grpc_calls_ref = grpc_calls.clone();
+        let http_host_ref = http_host.clone();
+        let http_port_ref = http_port.clone();
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        let result = rt.block_on(run_from_env(
+            AppConfig::default(),
+            |_| Ok(()),
+            move |host, port, _| {
+                http_calls_ref.fetch_add(1, Ordering::SeqCst);
+                *http_host_ref.lock().expect("http host lock") = host;
+                http_port_ref.store(usize::from(port), Ordering::SeqCst);
+                async { Ok::<(), io::Error>(()) }
+            },
+            move |_, _, _| {
+                grpc_calls_ref.fetch_add(1, Ordering::SeqCst);
+                async { Ok::<(), io::Error>(()) }
+            },
+        ));
+
+        assert!(result.is_ok());
+        assert_eq!(http_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(grpc_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            http_host.lock().expect("http host read").as_str(),
+            "0.0.0.0"
+        );
+        assert_eq!(http_port.load(Ordering::SeqCst), 8080);
     }
 }

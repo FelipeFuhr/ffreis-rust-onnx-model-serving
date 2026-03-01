@@ -14,7 +14,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
-use tokio::sync::{RwLock, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, RwLock, Semaphore};
 use tokio::time::timeout;
 use tonic::transport::Server;
 use tonic::{Code, Request, Response, Status};
@@ -302,59 +302,16 @@ impl AppState {
     }
 
     fn parse_payload(&self, payload: &[u8], content_type: &str) -> Result<ParsedInput, String> {
-        if self.cfg.input_mode != "tabular" {
-            return Err(format!(
-                "INPUT_MODE={} not implemented (tabular only for now)",
-                self.cfg.input_mode
-            ));
-        }
-
-        let normalized = strip_content_type_params(content_type);
+        validate_input_mode(&self.cfg)?;
+        let normalized = resolve_content_type(content_type);
         let onnx_input_map = load_json_map(&self.cfg.onnx_input_map_json)?;
-        if !onnx_input_map.is_empty() && is_json_content_type(&normalized) {
+        if should_use_onnx_multi_input(&onnx_input_map, &normalized) {
             return self.parse_onnx_multi_input(payload, &normalized, &onnx_input_map);
         }
 
-        let mut matrix = self.parse_tabular_matrix(payload, &normalized, content_type)?;
-
-        if matrix.is_empty() {
-            return Err("Parsed payload is empty".to_string());
-        }
-        if self.cfg.tabular_num_features > 0 {
-            let got = matrix.first().map_or(0, |r| r.len());
-            if got != self.cfg.tabular_num_features {
-                return Err(format!(
-                    "Feature count mismatch: got {got} expected TABULAR_NUM_FEATURES={}",
-                    self.cfg.tabular_num_features
-                ));
-            }
-        }
-
-        // Keep behavior-compatible hook for id/feature selectors without materializing
-        // split outputs yet; this preserves schema knobs at config level.
-        if !self.cfg.tabular_feature_columns.is_empty() || !self.cfg.tabular_id_columns.is_empty() {
-            let feature_idx = if !self.cfg.tabular_feature_columns.is_empty() {
-                parse_col_selector(
-                    &self.cfg.tabular_feature_columns,
-                    matrix.first().map_or(0, |r| r.len()),
-                )?
-            } else {
-                let n_cols = matrix.first().map_or(0, |r| r.len());
-                let id_idx = parse_col_selector(&self.cfg.tabular_id_columns, n_cols)?;
-                (0..n_cols)
-                    .filter(|col| !id_idx.contains(col))
-                    .collect::<Vec<usize>>()
-            };
-            matrix = matrix
-                .iter()
-                .map(|row| {
-                    feature_idx
-                        .iter()
-                        .map(|idx| row[*idx])
-                        .collect::<Vec<f64>>()
-                })
-                .collect::<Vec<Vec<f64>>>();
-        }
+        let matrix = self.parse_tabular_matrix(payload, &normalized, content_type)?;
+        validate_tabular_matrix_shape(&matrix, &self.cfg)?;
+        let matrix = apply_feature_selection(matrix, &self.cfg)?;
 
         Ok(ParsedInput {
             x: Some(matrix),
@@ -387,12 +344,7 @@ impl AppState {
         content_type: &str,
         onnx_input_map: &HashMap<String, String>,
     ) -> Result<ParsedInput, String> {
-        let records = if JSON_CONTENT_TYPES.contains(&content_type) {
-            parse_json_records(payload, &self.cfg)?
-        } else {
-            parse_jsonl_records(payload)?
-        };
-
+        let records = load_multi_input_records(payload, content_type, &self.cfg)?;
         if records.is_empty() {
             return Err(
                 "ONNX multi-input mode expects a JSON object or a non-empty list of objects"
@@ -400,41 +352,13 @@ impl AppState {
             );
         }
         let dtype_map = load_json_map(&self.cfg.onnx_input_dtype_map_json)?;
-        let mut tensors = HashMap::new();
-        let mut batch_sizes = Vec::new();
-
-        for (request_key, onnx_input_name) in onnx_input_map {
-            let mut values: Vec<Value> = Vec::new();
-            for record in &records {
-                let value = record.get(request_key).ok_or_else(|| {
-                    format!(
-                        "Missing key '{}' in one of the records for ONNX multi-input",
-                        request_key
-                    )
-                })?;
-                values.push(value.clone());
-            }
-            let _dtype_hint = dtype_map
-                .get(request_key)
-                .or_else(|| dtype_map.get(onnx_input_name))
-                .cloned()
-                .unwrap_or_else(|| self.cfg.tabular_dtype.clone());
-            if self.cfg.onnx_dynamic_batch {
-                batch_sizes.push(values.len());
-            }
-            tensors.insert(onnx_input_name.clone(), Value::Array(values));
-        }
-
-        if self.cfg.onnx_dynamic_batch {
-            if batch_sizes.is_empty() || batch_sizes.contains(&0) {
-                return Err("ONNX_DYNAMIC_BATCH enabled but batch dimension invalid".to_string());
-            }
-            if batch_sizes.windows(2).any(|w| w[0] != w[1]) {
-                return Err(format!(
-                    "ONNX inputs have mismatched batch sizes: {batch_sizes:?}"
-                ));
-            }
-        }
+        let tensors = build_onnx_tensors(
+            &records,
+            onnx_input_map,
+            &dtype_map,
+            &self.cfg.tabular_dtype,
+            self.cfg.onnx_dynamic_batch,
+        )?;
 
         Ok(ParsedInput {
             x: None,
@@ -450,29 +374,81 @@ impl AppState {
             return Ok((bytes, "application/json".to_string()));
         }
 
-        // skipcq: RS-W1031. Clippy enforces unwrap_or here because the fallback is a cheap borrowed &str.
-        let normalized_accept = accept
-            .split(',')
-            .next()
-            .unwrap_or(self.cfg.default_accept.as_str())
-            .trim()
-            .to_ascii_lowercase();
+        let normalized_accept = normalized_accept(accept, self.cfg.default_accept.as_str());
         if CSV_CONTENT_TYPES.contains(&normalized_accept.as_str()) {
             let csv = format_csv_predictions(&predictions, &self.cfg.csv_delimiter)?;
             return Ok((csv.into_bytes(), "text/csv".to_string()));
         }
 
-        let payload = if self.cfg.predictions_only {
-            predictions
-        } else {
-            let mut output: serde_json::Map<String, Value> = serde_json::Map::default();
-            output.insert(self.cfg.json_output_key.clone(), predictions);
-            Value::Object(output)
-        };
+        let payload = wrap_predictions_if_needed(predictions, &self.cfg);
         let bytes =
             serde_json::to_vec(&payload).map_err(|err| format!("failed to encode json: {err}"))?;
         Ok((bytes, "application/json".to_string()))
     }
+}
+
+fn validate_input_mode(cfg: &AppConfig) -> Result<(), String> {
+    if cfg.input_mode != "tabular" {
+        return Err(format!(
+            "INPUT_MODE={} not implemented (tabular only for now)",
+            cfg.input_mode
+        ));
+    }
+    Ok(())
+}
+
+fn resolve_content_type(raw: &str) -> String {
+    strip_content_type_params(raw)
+}
+
+fn should_use_onnx_multi_input(
+    onnx_input_map: &HashMap<String, String>,
+    content_type: &str,
+) -> bool {
+    !onnx_input_map.is_empty() && is_json_content_type(content_type)
+}
+
+fn validate_tabular_matrix_shape(matrix: &[Vec<f64>], cfg: &AppConfig) -> Result<(), String> {
+    if matrix.is_empty() {
+        return Err("Parsed payload is empty".to_string());
+    }
+    if cfg.tabular_num_features > 0 {
+        let got = matrix.first().map_or(0, |r| r.len());
+        if got != cfg.tabular_num_features {
+            return Err(format!(
+                "Feature count mismatch: got {got} expected TABULAR_NUM_FEATURES={}",
+                cfg.tabular_num_features
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn apply_feature_selection(
+    matrix: Vec<Vec<f64>>,
+    cfg: &AppConfig,
+) -> Result<Vec<Vec<f64>>, String> {
+    if cfg.tabular_feature_columns.is_empty() && cfg.tabular_id_columns.is_empty() {
+        return Ok(matrix);
+    }
+    let n_cols = matrix.first().map_or(0, |r| r.len());
+    let feature_idx = if !cfg.tabular_feature_columns.is_empty() {
+        parse_col_selector(&cfg.tabular_feature_columns, n_cols)?
+    } else {
+        let id_idx = parse_col_selector(&cfg.tabular_id_columns, n_cols)?;
+        (0..n_cols)
+            .filter(|col| !id_idx.contains(col))
+            .collect::<Vec<usize>>()
+    };
+    Ok(matrix
+        .iter()
+        .map(|row| {
+            feature_idx
+                .iter()
+                .map(|idx| row[*idx])
+                .collect::<Vec<f64>>()
+        })
+        .collect::<Vec<Vec<f64>>>())
 }
 
 fn strip_content_type_params(content_type: &str) -> String {
@@ -486,6 +462,68 @@ fn strip_content_type_params(content_type: &str) -> String {
 
 fn is_json_content_type(content_type: &str) -> bool {
     JSON_CONTENT_TYPES.contains(&content_type) || JSON_LINES_CONTENT_TYPES.contains(&content_type)
+}
+
+fn load_multi_input_records(
+    payload: &[u8],
+    content_type: &str,
+    cfg: &AppConfig,
+) -> Result<Vec<HashMap<String, Value>>, String> {
+    if JSON_CONTENT_TYPES.contains(&content_type) {
+        return parse_json_records(payload, cfg);
+    }
+    parse_jsonl_records(payload)
+}
+
+fn validate_dynamic_batch_sizes(batch_sizes: &[usize]) -> Result<(), String> {
+    if batch_sizes.is_empty() || batch_sizes.contains(&0) {
+        return Err("ONNX_DYNAMIC_BATCH enabled but batch dimension invalid".to_string());
+    }
+    if batch_sizes.windows(2).any(|w| w[0] != w[1]) {
+        return Err(format!(
+            "ONNX inputs have mismatched batch sizes: {batch_sizes:?}"
+        ));
+    }
+    Ok(())
+}
+
+fn build_onnx_tensors(
+    records: &[HashMap<String, Value>],
+    input_map: &HashMap<String, String>,
+    dtype_map: &HashMap<String, String>,
+    default_dtype: &str,
+    dynamic_batch: bool,
+) -> Result<HashMap<String, Value>, String> {
+    let mut tensors = HashMap::new();
+    let mut batch_sizes = Vec::new();
+
+    for (request_key, onnx_input_name) in input_map {
+        let mut values = Vec::new();
+        for record in records {
+            let value = record.get(request_key).ok_or_else(|| {
+                format!(
+                    "Missing key '{}' in one of the records for ONNX multi-input",
+                    request_key
+                )
+            })?;
+            values.push(value.clone());
+        }
+        let _dtype_hint = dtype_map
+            .get(request_key)
+            .or_else(|| dtype_map.get(onnx_input_name))
+            .cloned()
+            .unwrap_or_else(|| default_dtype.to_string());
+        if dynamic_batch {
+            batch_sizes.push(values.len());
+        }
+        tensors.insert(onnx_input_name.clone(), Value::Array(values));
+    }
+
+    if dynamic_batch {
+        validate_dynamic_batch_sizes(&batch_sizes)?;
+    }
+
+    Ok(tensors)
 }
 
 fn load_json_map(raw: &str) -> Result<HashMap<String, String>, String> {
@@ -705,6 +743,145 @@ fn parse_col_selector(selector: &str, n_cols: usize) -> Result<Vec<usize>, Strin
         .collect::<Result<Vec<usize>, String>>()
 }
 
+fn normalized_accept(accept: &str, default_accept: &str) -> String {
+    // skipcq: RS-W1031. Clippy enforces unwrap_or here because the fallback is a cheap borrowed &str.
+    accept
+        .split(',')
+        .next()
+        .unwrap_or(default_accept)
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn wrap_predictions_if_needed(predictions: Value, cfg: &AppConfig) -> Value {
+    if cfg.predictions_only {
+        return predictions;
+    }
+    let mut output: serde_json::Map<String, Value> = serde_json::Map::default();
+    output.insert(cfg.json_output_key.clone(), predictions);
+    Value::Object(output)
+}
+
+fn validate_payload_size(payload_len: usize, cfg: &AppConfig) -> Option<AxumResponse> {
+    if payload_len <= cfg.max_body_bytes {
+        return None;
+    }
+    Some(
+        (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(json!({
+                "error": "payload_too_large",
+                "max_bytes": cfg.max_body_bytes
+            })),
+        )
+            .into_response(),
+    )
+}
+
+fn resolve_request_media_types(headers: &HeaderMap, cfg: &AppConfig) -> (String, String) {
+    (
+        header_value_with_fallback(
+            headers,
+            CONTENT_TYPE,
+            SAGEMAKER_CONTENT_TYPE_HEADER,
+            cfg.default_content_type.as_str(),
+        ),
+        header_value_with_fallback(
+            headers,
+            ACCEPT,
+            SAGEMAKER_ACCEPT_HEADER,
+            cfg.default_accept.as_str(),
+        ),
+    )
+}
+
+async fn acquire_inflight_permit(
+    state: &Arc<AppState>,
+) -> Result<OwnedSemaphorePermit, AxumResponse> {
+    match timeout(
+        Duration::from_secs_f64(state.cfg.acquire_timeout_s.max(0.0)),
+        state.inflight.clone().acquire_owned(),
+    )
+    .await
+    {
+        Ok(Ok(permit)) => Ok(permit),
+        _ => Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({"error": "too_many_requests"})),
+        )
+            .into_response()),
+    }
+}
+
+async fn parse_and_validate_request(
+    state: &Arc<AppState>,
+    payload: &[u8],
+    content_type: &str,
+) -> Result<(ParsedInput, usize), AxumResponse> {
+    let parsed = state
+        .parse_payload(payload, content_type)
+        .map_err(|err| (StatusCode::BAD_REQUEST, Json(json!({ "error": err }))).into_response())?;
+    let batch = parsed
+        .batch_size()
+        .map_err(|err| (StatusCode::BAD_REQUEST, Json(json!({ "error": err }))).into_response())?;
+    if batch > state.cfg.max_records {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("too_many_records: {batch} > {}", state.cfg.max_records) })),
+        )
+            .into_response());
+    }
+    Ok((parsed, batch))
+}
+
+async fn predict_and_format(
+    state: &Arc<AppState>,
+    parsed: &ParsedInput,
+    accept: &str,
+) -> Result<(Vec<u8>, String), AxumResponse> {
+    let adapter = state.ensure_adapter_loaded().await.map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": err })),
+        )
+            .into_response()
+    })?;
+    let predictions = adapter
+        .predict(parsed)
+        .map_err(|err| (StatusCode::BAD_REQUEST, Json(json!({ "error": err }))).into_response())?;
+    state
+        .format_output(predictions, accept)
+        .map_err(|err| (StatusCode::BAD_REQUEST, Json(json!({ "error": err }))).into_response())
+}
+
+fn build_success_response(body: Vec<u8>, content_type: String) -> AxumResponse {
+    let mut response = (StatusCode::OK, body).into_response();
+    if let Ok(header) = content_type.parse() {
+        response.headers_mut().insert(CONTENT_TYPE, header);
+    }
+    attach_trace_correlation_headers(&mut response);
+    response
+}
+
+fn read_openapi_from_env() -> Option<String> {
+    let path = std::env::var(OPENAPI_SPEC_PATH_ENV_KEY).ok()?;
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    fs::read_to_string(trimmed).ok()
+}
+
+fn openapi_candidate_paths() -> [PathBuf; 2] {
+    [
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("docs")
+            .join("openapi.yaml"),
+        PathBuf::from("docs").join("openapi.yaml"),
+    ]
+}
+
 fn format_csv_predictions(predictions: &Value, delimiter: &str) -> Result<String, String> {
     if let Some(rows) = predictions.as_array() {
         if rows.first().is_some_and(|item| item.is_array()) {
@@ -799,113 +976,33 @@ async fn http_invocations(
     headers: HeaderMap,
     payload: Bytes,
 ) -> AxumResponse {
-    if payload.len() > state.cfg.max_body_bytes {
-        return (
-            StatusCode::PAYLOAD_TOO_LARGE,
-            Json(json!({
-                "error": "payload_too_large",
-                "max_bytes": state.cfg.max_body_bytes
-            })),
-        )
-            .into_response();
+    if let Some(response) = validate_payload_size(payload.len(), &state.cfg) {
+        return response;
     }
 
-    let content_type = header_value_with_fallback(
-        &headers,
-        CONTENT_TYPE,
-        SAGEMAKER_CONTENT_TYPE_HEADER,
-        state.cfg.default_content_type.as_str(),
-    );
-    let accept = header_value_with_fallback(
-        &headers,
-        ACCEPT,
-        SAGEMAKER_ACCEPT_HEADER,
-        state.cfg.default_accept.as_str(),
-    );
-    let result = {
-        let _permit = match timeout(
-            Duration::from_secs_f64(state.cfg.acquire_timeout_s.max(0.0)),
-            state.inflight.clone().acquire_owned(),
-        )
-        .await
-        {
-            Ok(Ok(permit)) => permit,
-            _ => {
-                return (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    Json(json!({"error": "too_many_requests"})),
-                )
-                    .into_response();
-            }
-        };
-
-        let adapter = match state.ensure_adapter_loaded().await {
-            Ok(adapter) => adapter,
-            Err(err) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": err})),
-                )
-                    .into_response();
-            }
-        };
-        let parsed = match state.parse_payload(payload.as_ref(), content_type.as_str()) {
-            Ok(parsed) => parsed,
-            Err(err) => {
-                return (StatusCode::BAD_REQUEST, Json(json!({ "error": err }))).into_response();
-            }
-        };
-        let batch = match parsed.batch_size() {
-            Ok(size) => size,
-            Err(err) => {
-                return (StatusCode::BAD_REQUEST, Json(json!({ "error": err }))).into_response();
-            }
-        };
-        if batch > state.cfg.max_records {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({ "error": format!("too_many_records: {batch} > {}", state.cfg.max_records) })),
-            )
-                .into_response();
-        }
-        let predictions = match adapter.predict(&parsed) {
-            Ok(predictions) => predictions,
-            Err(err) => {
-                return (StatusCode::BAD_REQUEST, Json(json!({ "error": err }))).into_response();
-            }
-        };
-        state.format_output(predictions, accept.as_str())
+    let (content_type, accept) = resolve_request_media_types(&headers, &state.cfg);
+    let _permit = match acquire_inflight_permit(&state).await {
+        Ok(permit) => permit,
+        Err(response) => return response,
     };
-
-    match result {
-        Ok((body, content_type)) => {
-            let mut response = (StatusCode::OK, body).into_response();
-            if let Ok(header) = content_type.parse() {
-                response.headers_mut().insert(CONTENT_TYPE, header);
-            }
-            attach_trace_correlation_headers(&mut response);
-            response
-        }
-        Err(err) => (StatusCode::BAD_REQUEST, Json(json!({ "error": err }))).into_response(),
-    }
+    let (parsed, _) =
+        match parse_and_validate_request(&state, payload.as_ref(), &content_type).await {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+    let (body, output_content_type) = match predict_and_format(&state, &parsed, &accept).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    build_success_response(body, output_content_type)
 }
 
 fn load_openapi_yaml() -> Option<String> {
-    if let Ok(path) = std::env::var(OPENAPI_SPEC_PATH_ENV_KEY) {
-        let trimmed = path.trim();
-        if !trimmed.is_empty() {
-            return fs::read_to_string(trimmed).ok();
-        }
+    if let Some(spec) = read_openapi_from_env() {
+        return Some(spec);
     }
 
-    let candidates = [
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("docs")
-            .join("openapi.yaml"),
-        PathBuf::from("docs").join("openapi.yaml"),
-    ];
-    for path in candidates {
+    for path in openapi_candidate_paths() {
         if let Ok(spec) = fs::read_to_string(&path) {
             return Some(spec);
         }
@@ -1228,6 +1325,117 @@ mod tests {
     }
 
     #[test]
+    fn parse_payload_stage_helpers_cover_core_decisions() {
+        let err = validate_input_mode(&AppConfig {
+            input_mode: "image".to_string(),
+            ..AppConfig::default()
+        })
+        .expect_err("invalid mode");
+        assert!(err.contains("not implemented"));
+        assert!(validate_input_mode(&AppConfig::default()).is_ok());
+
+        let mut onnx_map = HashMap::new();
+        onnx_map.insert("a".to_string(), "input_a".to_string());
+        assert!(should_use_onnx_multi_input(&onnx_map, "application/json"));
+        assert!(!should_use_onnx_multi_input(
+            &HashMap::new(),
+            "application/json"
+        ));
+        assert!(!should_use_onnx_multi_input(&onnx_map, "text/csv"));
+
+        let shape_err =
+            validate_tabular_matrix_shape(&[], &AppConfig::default()).expect_err("empty matrix");
+        assert!(shape_err.contains("Parsed payload is empty"));
+        let mismatch_err = validate_tabular_matrix_shape(
+            &[vec![1.0, 2.0]],
+            &AppConfig {
+                tabular_num_features: 3,
+                ..AppConfig::default()
+            },
+        )
+        .expect_err("feature mismatch");
+        assert!(mismatch_err.contains("Feature count mismatch"));
+    }
+
+    #[test]
+    fn apply_feature_selection_returns_original_when_selectors_are_empty() {
+        let rows = vec![vec![1.0, 2.0], vec![3.0, 4.0]];
+        let selected =
+            apply_feature_selection(rows.clone(), &AppConfig::default()).expect("selection pass");
+        assert_eq!(selected, rows);
+    }
+
+    #[test]
+    fn multi_input_helpers_cover_json_dispatch_and_batch_validation() {
+        let records = load_multi_input_records(
+            br#"{"instances":[{"a":[1,2]},{"a":[3,4]}]}"#,
+            "application/json",
+            &AppConfig::default(),
+        )
+        .expect("json records");
+        assert_eq!(records.len(), 2);
+
+        let records = load_multi_input_records(
+            br#"{"a":[1,2]}
+{"a":[3,4]}"#,
+            "application/x-jsonlines",
+            &AppConfig::default(),
+        )
+        .expect("jsonl records");
+        assert_eq!(records.len(), 2);
+
+        let invalid = validate_dynamic_batch_sizes(&[2, 0]).expect_err("zero batch invalid");
+        assert!(invalid.contains("batch dimension invalid"));
+        let mismatch =
+            validate_dynamic_batch_sizes(&[2, 3]).expect_err("mismatched batch sizes invalid");
+        assert!(mismatch.contains("mismatched batch sizes"));
+        assert!(validate_dynamic_batch_sizes(&[2, 2]).is_ok());
+    }
+
+    #[test]
+    fn media_and_output_helpers_cover_fallbacks() {
+        assert_eq!(
+            normalized_accept("text/csv,application/json", "application/json"),
+            "text/csv"
+        );
+        assert_eq!(normalized_accept("", "application/json"), "");
+
+        let wrapped = wrap_predictions_if_needed(
+            Value::Array(vec![Value::from(1)]),
+            &AppConfig {
+                predictions_only: false,
+                json_output_key: "result".to_string(),
+                ..AppConfig::default()
+            },
+        );
+        assert_eq!(wrapped, json!({"result":[1]}));
+        let plain = wrap_predictions_if_needed(Value::from(1), &AppConfig::default());
+        assert_eq!(plain, Value::from(1));
+    }
+
+    #[test]
+    fn request_phase_helpers_cover_media_resolution_and_size_checks() {
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(ACCEPT, HeaderValue::from_static("text/csv"));
+        let cfg = AppConfig::default();
+        let (content_type, accept) = resolve_request_media_types(&headers, &cfg);
+        assert_eq!(content_type, "application/json");
+        assert_eq!(accept, "text/csv");
+
+        let oversized = validate_payload_size(
+            128,
+            &AppConfig {
+                max_body_bytes: 64,
+                ..AppConfig::default()
+            },
+        )
+        .expect("oversized payload should return response");
+        assert_eq!(oversized.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(validate_payload_size(64, &AppConfig::default()).is_none());
+    }
+
+    #[test]
     fn parse_json_records_supports_instances_and_object_shape() {
         let cfg = AppConfig::default();
         let from_instances = parse_json_records(br#"{"instances":[{"a":1},{"a":2}]}"#, &cfg)
@@ -1384,6 +1592,52 @@ mod tests {
             "text/plain",
         );
         assert_eq!(defaulted, "text/plain");
+    }
+
+    #[test]
+    fn header_value_with_fallback_uses_default_for_invalid_fallback_name() {
+        let value = header_value_with_fallback(
+            &HeaderMap::new(),
+            CONTENT_TYPE,
+            "Invalid Header Name",
+            "application/json",
+        );
+        assert_eq!(value, "application/json");
+    }
+
+    #[test]
+    fn load_openapi_yaml_supports_blank_and_missing_env_paths() {
+        let _guard = env_lock().lock().expect("env lock");
+
+        let _missing = EnvVarGuard::set(OPENAPI_SPEC_PATH_ENV_KEY, "/definitely/missing/spec.yaml");
+        assert!(read_openapi_from_env().is_none());
+        drop(_missing);
+
+        let _blank = EnvVarGuard::set(OPENAPI_SPEC_PATH_ENV_KEY, "   ");
+        assert!(read_openapi_from_env().is_none());
+        let spec = load_openapi_yaml().expect("repo openapi spec should be discoverable");
+        assert!(spec.contains("openapi:"));
+    }
+
+    #[tokio::test]
+    async fn http_live_and_metrics_handlers_return_ok_with_expected_payloads() {
+        let live = http_live().await.into_response();
+        assert_eq!(live.status(), StatusCode::OK);
+        let live_body = to_bytes(live.into_body(), usize::MAX)
+            .await
+            .expect("live body");
+        assert_eq!(
+            String::from_utf8(live_body.to_vec()).expect("live utf8"),
+            "\n"
+        );
+
+        let metrics = http_metrics().await.into_response();
+        assert_eq!(metrics.status(), StatusCode::OK);
+        let metrics_body = to_bytes(metrics.into_body(), usize::MAX)
+            .await
+            .expect("metrics body");
+        let metrics_text = String::from_utf8(metrics_body.to_vec()).expect("metrics utf8");
+        assert!(metrics_text.contains("byoc_up 1"));
     }
 
     #[test]
