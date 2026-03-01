@@ -462,10 +462,11 @@ async fn multi_input_missing_key_maps_to_http_400_and_grpc_invalid_argument() {
 
 #[tokio::test]
 async fn readiness_endpoints_return_500_when_model_dir_missing() {
+    let tmp = tempfile::tempdir().expect("temp dir");
     let cfg = AppConfig {
         model_type: "onnx".to_string(),
-        model_dir: "/definitely/missing/dir".to_string(),
-        model_filename: "model.onnx".to_string(),
+        model_dir: tmp.path().to_string_lossy().to_string(),
+        model_filename: "missing.onnx".to_string(),
         ..AppConfig::default()
     };
     let (http_base, http_handle) = start_http_server(cfg).await;
