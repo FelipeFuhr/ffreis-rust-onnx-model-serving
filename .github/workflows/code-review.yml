@@ -7,6 +7,7 @@ on:
       - "app/**"
       - "docs/openapi.yaml"
       - "scripts/check_openapi.py"
+      - "scripts/check_openapi_drift.py"
       - "Makefile"
       - "rust-toolchain.toml"
       - ".github/workflows/code-review.yml"
@@ -16,6 +17,7 @@ on:
       - "app/**"
       - "docs/openapi.yaml"
       - "scripts/check_openapi.py"
+      - "scripts/check_openapi_drift.py"
       - "Makefile"
       - "rust-toolchain.toml"
       - ".github/workflows/code-review.yml"
@@ -36,6 +38,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b
         with:
@@ -62,6 +66,17 @@ jobs:
         run: |
           set -euo pipefail
           make openapi-check
+
+      - name: OpenAPI drift check
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BASE_SHA}" ] || [ "${BASE_SHA}" = "0000000000000000000000000000000000000000" ]; then
+            BASE_SHA="$(git rev-parse HEAD~1)"
+          fi
+          make openapi-drift-check BASE_SHA="$BASE_SHA" HEAD_SHA="$HEAD_SHA"
 
       - name: Install cargo-llvm-cov
         run: |

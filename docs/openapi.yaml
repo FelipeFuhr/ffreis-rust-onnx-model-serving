@@ -8,6 +8,8 @@ info:
     This OpenAPI document defines transport-level behavior (paths, payload media types,
     headers, and response envelopes). Model-specific tensor semantics are defined in
     a separate model manifest bundled with model artifacts.
+
+    Optional Swagger UI can be exposed by setting `SWAGGER_ENABLED=true`.
 servers:
   - url: http://localhost:8080
     description: Local default
@@ -15,6 +17,7 @@ servers:
 tags:
   - name: health
   - name: inference
+  - name: docs
 
 paths:
   /live:
@@ -226,6 +229,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+
+  /openapi.yaml:
+    get:
+      tags: [docs]
+      summary: OpenAPI contract document
+      operationId: openapiSpec
+      description: Served only when `SWAGGER_ENABLED=true`.
+      responses:
+        '200':
+          description: OpenAPI YAML document
+          content:
+            application/yaml:
+              schema:
+                type: string
+
+  /docs:
+    get:
+      tags: [docs]
+      summary: Swagger UI
+      operationId: swaggerUi
+      description: Served only when `SWAGGER_ENABLED=true`.
+      responses:
+        '200':
+          description: Swagger UI HTML page
+          content:
+            text/html:
+              schema:
+                type: string
 
 components:
   parameters:

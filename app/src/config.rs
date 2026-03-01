@@ -40,6 +40,7 @@ pub struct AppConfig {
     pub onnx_input_name: String,
     pub onnx_output_name: String,
     pub onnx_output_index: usize,
+    pub swagger_enabled: bool,
 }
 
 impl Default for AppConfig {
@@ -88,6 +89,7 @@ impl Default for AppConfig {
             onnx_input_name: env_str("ONNX_INPUT_NAME", "").trim().to_string(),
             onnx_output_name: env_str("ONNX_OUTPUT_NAME", "").trim().to_string(),
             onnx_output_index: env_usize("ONNX_OUTPUT_INDEX", 0),
+            swagger_enabled: env_bool("SWAGGER_ENABLED", false),
         }
     }
 }
@@ -162,21 +164,26 @@ mod tests {
         let bool_key = "APP_TEST_BOOL";
         let usize_key = "APP_TEST_USIZE";
         let f64_key = "APP_TEST_F64";
+        let swagger_key = "SWAGGER_ENABLED";
 
         env::remove_var(bool_key);
         env::remove_var(usize_key);
         env::remove_var(f64_key);
+        env::remove_var(swagger_key);
 
         assert!(env_bool(bool_key, true));
         assert_eq!(env_usize(usize_key, 7), 7);
         assert_eq!(env_f64(f64_key, 1.5), 1.5);
+        assert!(!AppConfig::default().swagger_enabled);
 
         env::set_var(bool_key, "yes");
         env::set_var(usize_key, "12");
         env::set_var(f64_key, "2.75");
+        env::set_var(swagger_key, "true");
         assert!(env_bool(bool_key, false));
         assert_eq!(env_usize(usize_key, 0), 12);
         assert_eq!(env_f64(f64_key, 0.0), 2.75);
+        assert!(AppConfig::default().swagger_enabled);
 
         env::set_var(bool_key, "no");
         env::set_var(usize_key, "bad");
@@ -188,6 +195,7 @@ mod tests {
         env::remove_var(bool_key);
         env::remove_var(usize_key);
         env::remove_var(f64_key);
+        env::remove_var(swagger_key);
     }
 
     #[test]

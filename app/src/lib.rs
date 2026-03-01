@@ -7,7 +7,7 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::header::{ACCEPT, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderName, StatusCode};
-use axum::response::{IntoResponse, Response as AxumResponse};
+use axum::response::{Html, IntoResponse, Response as AxumResponse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
@@ -39,6 +39,30 @@ const JSON_LINES_CONTENT_TYPES: &[&str] = &[
 const CSV_CONTENT_TYPES: &[&str] = &["text/csv", "application/csv"];
 const SAGEMAKER_CONTENT_TYPE_HEADER: &str = "x-amzn-sagemaker-content-type";
 const SAGEMAKER_ACCEPT_HEADER: &str = "x-amzn-sagemaker-accept";
+const OPENAPI_YAML: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../docs/openapi.yaml"));
+const SWAGGER_UI_HTML: &str = r##"<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.ui = SwaggerUIBundle({
+      url: "/openapi.yaml",
+      dom_id: "#swagger-ui",
+      deepLinking: true,
+      presets: [SwaggerUIBundle.presets.apis],
+    });
+  </script>
+</body>
+</html>
+"##;
 
 #[derive(Clone, Debug)]
 pub struct ParsedInput {
@@ -714,6 +738,7 @@ fn value_to_string(value: &Value) -> String {
 pub fn build_http_router(cfg: AppConfig) -> Router {
     let metrics_path = cfg.prometheus_path.clone();
     let prometheus_enabled = cfg.prometheus_enabled;
+    let swagger_enabled = cfg.swagger_enabled;
     let state = Arc::new(AppState::new(cfg));
     let mut router = Router::new()
         .route("/live", get(http_live))
@@ -722,6 +747,11 @@ pub fn build_http_router(cfg: AppConfig) -> Router {
         .route("/readyz", get(http_ready))
         .route("/ping", get(http_ready))
         .route("/invocations", post(http_invocations));
+    if swagger_enabled {
+        router = router
+            .route("/openapi.yaml", get(http_openapi_spec))
+            .route("/docs", get(http_swagger_ui));
+    }
     if prometheus_enabled {
         router = router.route(metrics_path.as_str(), get(http_metrics));
     }
@@ -746,6 +776,18 @@ async fn http_metrics() -> impl IntoResponse {
         "# HELP byoc_up Service readiness\n# TYPE byoc_up gauge\nbyoc_up 1\n",
     )
         .into_response()
+}
+
+async fn http_openapi_spec() -> impl IntoResponse {
+    (
+        [(CONTENT_TYPE, "application/yaml; charset=utf-8")],
+        OPENAPI_YAML,
+    )
+        .into_response()
+}
+
+async fn http_swagger_ui() -> impl IntoResponse {
+    Html(SWAGGER_UI_HTML)
 }
 
 async fn http_invocations(
@@ -1044,6 +1086,7 @@ impl grpc::inference_service_server::InferenceService for InferenceGrpcService {
 mod tests {
     use super::*;
     use crate::grpc::inference_service_server::InferenceService;
+    use axum::body::to_bytes;
     use axum::body::Bytes;
     use axum::http::HeaderValue;
     use proptest::prelude::*;
@@ -1300,6 +1343,26 @@ mod tests {
         )
         .expect("row csv");
         assert_eq!(rows, ";2\nx;4");
+    }
+
+    #[tokio::test]
+    async fn swagger_handlers_serve_openapi_and_ui() {
+        let spec_response = http_openapi_spec().await.into_response();
+        assert_eq!(spec_response.status(), StatusCode::OK);
+        let spec_body = to_bytes(spec_response.into_body(), usize::MAX)
+            .await
+            .expect("spec body");
+        let spec_text = String::from_utf8(spec_body.to_vec()).expect("spec utf8");
+        assert!(spec_text.contains("openapi: 3.1.0"));
+
+        let ui_response = http_swagger_ui().await.into_response();
+        assert_eq!(ui_response.status(), StatusCode::OK);
+        let ui_body = to_bytes(ui_response.into_body(), usize::MAX)
+            .await
+            .expect("ui body");
+        let ui_text = String::from_utf8(ui_body.to_vec()).expect("ui utf8");
+        assert!(ui_text.contains("SwaggerUIBundle"));
+        assert!(ui_text.contains("/openapi.yaml"));
     }
 
     #[test]

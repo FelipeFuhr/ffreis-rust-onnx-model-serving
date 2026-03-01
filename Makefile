@@ -179,6 +179,12 @@ grpc-check: ## Verify protobuf/gRPC contract compiles
 openapi-check: ## Validate OpenAPI contract
 	uv run --with openapi-spec-validator --with pyyaml python scripts/check_openapi.py
 
+.PHONY: openapi-drift-check
+openapi-drift-check: ## Ensure API changes are accompanied by OpenAPI updates
+	@test -n "$(BASE_SHA)" || (echo "BASE_SHA is required" && exit 1)
+	@test -n "$(HEAD_SHA)" || (echo "HEAD_SHA is required" && exit 1)
+	python3 scripts/check_openapi_drift.py --base "$(BASE_SHA)" --head "$(HEAD_SHA)"
+
 .PHONY: test-grpc-parity
 test-grpc-parity: ## Run HTTP/gRPC parity tests
 	$(MAKE) -C app test-grpc-parity
