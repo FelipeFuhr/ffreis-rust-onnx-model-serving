@@ -41,18 +41,45 @@ fn make_temp_model_dir() -> tempfile::TempDir {
     tmp
 }
 
+fn spawn_http_binary(
+    exe: &str,
+    port: u16,
+    model_dir: Option<&std::path::Path>,
+    max_body_bytes: Option<usize>,
+) -> Child {
+    let mut cmd = Command::new(exe);
+    cmd.env("SERVE_MODE", "http")
+        .env("HOST", "127.0.0.1")
+        .env("PORT", port.to_string());
+    if let Some(dir) = model_dir {
+        cmd.env("MODEL_TYPE", "onnx")
+            .env("SM_MODEL_DIR", dir.to_string_lossy().to_string());
+    }
+    if let Some(limit) = max_body_bytes {
+        cmd.env("MAX_BODY_BYTES", limit.to_string());
+    }
+    cmd.spawn().expect("spawn app binary")
+}
+
+fn post_json_invocations(port: u16, body: Vec<u8>) -> reqwest::blocking::Response {
+    let client = reqwest::blocking::Client::new();
+    let url = format!("http://127.0.0.1:{port}/invocations");
+    client
+        .post(url)
+        .header("content-type", "application/json")
+        .header("accept", "application/json")
+        .body(body)
+        .send()
+        .expect("invocations request")
+}
+
 #[test]
 fn binary_starts_http_service_and_answers_healthz() {
     let Some(exe) = option_env!("CARGO_BIN_EXE_app") else {
         return; // Skip when binary is not available in this context.
     };
     let port = free_port();
-    let mut child = Command::new(exe)
-        .env("SERVE_MODE", "http")
-        .env("HOST", "127.0.0.1")
-        .env("PORT", port.to_string())
-        .spawn()
-        .expect("spawn app binary");
+    let mut child = spawn_http_binary(exe, port, None, None);
 
     thread::sleep(Duration::from_millis(250));
     let url = format!("http://127.0.0.1:{port}/healthz");
@@ -69,28 +96,10 @@ fn binary_handles_invocations_happy_path() {
     };
     let model_dir = make_temp_model_dir();
     let port = free_port();
-    let mut child = Command::new(exe)
-        .env("SERVE_MODE", "http")
-        .env("HOST", "127.0.0.1")
-        .env("PORT", port.to_string())
-        .env("MODEL_TYPE", "onnx")
-        .env(
-            "SM_MODEL_DIR",
-            model_dir.path().to_string_lossy().to_string(),
-        )
-        .spawn()
-        .expect("spawn app binary");
+    let mut child = spawn_http_binary(exe, port, Some(model_dir.path()), None);
 
     thread::sleep(Duration::from_millis(350));
-    let client = reqwest::blocking::Client::new();
-    let url = format!("http://127.0.0.1:{port}/invocations");
-    let response = client
-        .post(url)
-        .header("content-type", "application/json")
-        .header("accept", "application/json")
-        .body(br#"{"instances":[[1.0,2.0],[3.0,4.0]]}"#.to_vec())
-        .send()
-        .expect("invocations request");
+    let response = post_json_invocations(port, br#"{"instances":[[1.0,2.0],[3.0,4.0]]}"#.to_vec());
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     let body = response.text().expect("body text");
     assert!(!body.is_empty(), "prediction body should not be empty");
@@ -105,29 +114,10 @@ fn binary_returns_413_when_payload_too_large() {
     };
     let model_dir = make_temp_model_dir();
     let port = free_port();
-    let mut child = Command::new(exe)
-        .env("SERVE_MODE", "http")
-        .env("HOST", "127.0.0.1")
-        .env("PORT", port.to_string())
-        .env("MODEL_TYPE", "onnx")
-        .env(
-            "SM_MODEL_DIR",
-            model_dir.path().to_string_lossy().to_string(),
-        )
-        .env("MAX_BODY_BYTES", "8")
-        .spawn()
-        .expect("spawn app binary");
+    let mut child = spawn_http_binary(exe, port, Some(model_dir.path()), Some(8));
 
     thread::sleep(Duration::from_millis(350));
-    let client = reqwest::blocking::Client::new();
-    let url = format!("http://127.0.0.1:{port}/invocations");
-    let response = client
-        .post(url)
-        .header("content-type", "application/json")
-        .header("accept", "application/json")
-        .body(br#"{"instances":[[1.0,2.0],[3.0,4.0]]}"#.to_vec())
-        .send()
-        .expect("invocations request");
+    let response = post_json_invocations(port, br#"{"instances":[[1.0,2.0],[3.0,4.0]]}"#.to_vec());
     assert_eq!(response.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
 
     stop_child_gracefully(&mut child);
