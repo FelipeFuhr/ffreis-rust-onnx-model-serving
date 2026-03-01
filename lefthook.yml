@@ -35,4 +35,4 @@ pre-push:
       run: make -C app check-e2e-min E2E_MIN_TESTS=3
 
     coverage-segments:
-      run: make -C app coverage-segment-check INTEGRATION_COVERAGE_MIN=55 E2E_COVERAGE_MIN=25
+      run: make -C app coverage-segment-check INTEGRATION_COVERAGE_MIN=57 E2E_COVERAGE_MIN=48
