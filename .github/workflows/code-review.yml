@@ -8,6 +8,8 @@ on:
       - "docs/openapi.yaml"
       - "scripts/check_openapi.py"
       - "scripts/check_openapi_drift.py"
+      - "scripts/check_coverage.py"
+      - "scripts/check_coverage_per_file.py"
       - "Makefile"
       - "rust-toolchain.toml"
       - ".github/workflows/code-review.yml"
@@ -18,6 +20,8 @@ on:
       - "docs/openapi.yaml"
       - "scripts/check_openapi.py"
       - "scripts/check_openapi_drift.py"
+      - "scripts/check_coverage.py"
+      - "scripts/check_coverage_per_file.py"
       - "Makefile"
       - "rust-toolchain.toml"
       - ".github/workflows/code-review.yml"
@@ -108,6 +112,11 @@ jobs:
         run: |
           set -euo pipefail
           make -C app test-e2e
+
+      - name: Integration and E2E coverage thresholds
+        run: |
+          set -euo pipefail
+          make -C app coverage-segment-check
 
       - name: Coverage threshold
         run: |

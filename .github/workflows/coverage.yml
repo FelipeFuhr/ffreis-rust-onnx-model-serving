@@ -5,6 +5,8 @@ on:
     branches: [ main ]
     paths:
       - "app/**"
+      - "scripts/check_coverage.py"
+      - "scripts/check_coverage_per_file.py"
       - "Makefile"
       - "rust-toolchain.toml"
       - ".github/workflows/coverage.yml"
@@ -12,6 +14,8 @@ on:
     branches: [ main ]
     paths:
       - "app/**"
+      - "scripts/check_coverage.py"
+      - "scripts/check_coverage_per_file.py"
       - "Makefile"
       - "rust-toolchain.toml"
       - ".github/workflows/coverage.yml"
@@ -61,6 +65,11 @@ jobs:
           set -euo pipefail
           make -C app coverage
           test -s coverage/cobertura.xml
+
+      - name: Integration and E2E coverage thresholds
+        run: |
+          set -euo pipefail
+          make -C app coverage-segment-check
 
       - name: Check Codecov token availability
         id: codecov_gate

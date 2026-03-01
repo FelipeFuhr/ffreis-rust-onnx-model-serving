@@ -11,9 +11,16 @@ PYTHON ?= python3
 CARGO_LOCKED ?= --locked
 
 COVERAGE_MIN ?= 90
+COVERAGE_PER_FILE_MIN ?= 90
+COVERAGE_FILES ?= app/src/main.rs,app/src/lib.rs,app/src/config.rs,app/src/telemetry.rs
+INTEGRATION_COVERAGE_MIN ?= 60
+E2E_COVERAGE_MIN ?= 20
 ROOT_DIR ?= $(abspath ..)
 COVERAGE_XML ?= $(ROOT_DIR)/coverage/cobertura.xml
+INTEGRATION_COVERAGE_XML ?= $(ROOT_DIR)/coverage/cobertura-integration.xml
+E2E_COVERAGE_XML ?= $(ROOT_DIR)/coverage/cobertura-e2e.xml
 CHECK_COVERAGE_SCRIPT ?= $(ROOT_DIR)/scripts/check_coverage.py
+CHECK_COVERAGE_PER_FILE_SCRIPT ?= $(ROOT_DIR)/scripts/check_coverage_per_file.py
 COVERAGE_DIR := $(dir $(COVERAGE_XML))
 
 # ------------------------------------------------------------------------------
@@ -108,6 +115,24 @@ coverage: ## Generate coverage report (Cobertura XML)
 	mkdir -p "$(COVERAGE_DIR)"
 	$(CARGO) llvm-cov --all-features --workspace --all-targets --cobertura --output-path "$(COVERAGE_XML)"
 
+.PHONY: coverage-integration
+coverage-integration: ## Generate integration-test coverage report
+	command -v cargo-llvm-cov >/dev/null 2>&1 || { \
+		echo "cargo-llvm-cov not installed. Install with: cargo install cargo-llvm-cov --locked"; \
+		exit 1; \
+	}
+	mkdir -p "$(COVERAGE_DIR)"
+	$(CARGO) llvm-cov --all-features --workspace --test integration_tests --cobertura --output-path "$(INTEGRATION_COVERAGE_XML)"
+
+.PHONY: coverage-e2e
+coverage-e2e: ## Generate e2e-test coverage report
+	command -v cargo-llvm-cov >/dev/null 2>&1 || { \
+		echo "cargo-llvm-cov not installed. Install with: cargo install cargo-llvm-cov --locked"; \
+		exit 1; \
+	}
+	mkdir -p "$(COVERAGE_DIR)"
+	$(CARGO) llvm-cov --all-features --workspace --test e2e_tests --cobertura --output-path "$(E2E_COVERAGE_XML)"
+
 .PHONY: coverage-check
 coverage-check: ## Fail if coverage is below COVERAGE_MIN
 	command -v cargo-llvm-cov >/dev/null 2>&1 || { \
@@ -116,4 +141,19 @@ coverage-check: ## Fail if coverage is below COVERAGE_MIN
 	}
 	$(MAKE) coverage
 	COVERAGE_MIN="$(COVERAGE_MIN)" COVERAGE_XML="$(COVERAGE_XML)" \
+		"$(PYTHON)" "$(CHECK_COVERAGE_SCRIPT)"
+	COVERAGE_PER_FILE_MIN="$(COVERAGE_PER_FILE_MIN)" COVERAGE_FILES="$(COVERAGE_FILES)" \
+		COVERAGE_XML="$(COVERAGE_XML)" "$(PYTHON)" "$(CHECK_COVERAGE_PER_FILE_SCRIPT)"
+
+.PHONY: coverage-segment-check
+coverage-segment-check: ## Fail if integration/e2e coverage is below thresholds
+	command -v cargo-llvm-cov >/dev/null 2>&1 || { \
+		echo "cargo-llvm-cov not installed. Install with: cargo install cargo-llvm-cov --locked"; \
+		exit 1; \
+	}
+	$(MAKE) coverage-integration
+	COVERAGE_MIN="$(INTEGRATION_COVERAGE_MIN)" COVERAGE_XML="$(INTEGRATION_COVERAGE_XML)" \
+		"$(PYTHON)" "$(CHECK_COVERAGE_SCRIPT)"
+	$(MAKE) coverage-e2e
+	COVERAGE_MIN="$(E2E_COVERAGE_MIN)" COVERAGE_XML="$(E2E_COVERAGE_XML)" \
 		"$(PYTHON)" "$(CHECK_COVERAGE_SCRIPT)"
