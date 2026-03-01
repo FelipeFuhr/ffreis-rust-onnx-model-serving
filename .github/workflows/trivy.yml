@@ -41,9 +41,18 @@ jobs:
           set -euo pipefail
           CONTAINER_COMMAND=podman make build
       - name: Install Trivy
-        uses: aquasecurity/setup-trivy@v0.2.2
-        with:
-          version: v0.67.2
+        run: |
+          set -euo pipefail
+          TRIVY_VERSION="v0.67.2"
+          INSTALL_URL="https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh"
+          FALLBACK_URL="https://raw.githubusercontent.com/aquasecurity/trivy/master/contrib/install.sh"
+
+          if ! curl -sfL --proto '=https' --proto-redir '=https' "${INSTALL_URL}" \
+            | sudo sh -s -- -b /usr/local/bin "${TRIVY_VERSION}"; then
+            echo "Tagged installer URL failed, retrying with master branch installer path..."
+            curl -sfL --proto '=https' --proto-redir '=https' "${FALLBACK_URL}" \
+              | sudo sh -s -- -b /usr/local/bin "${TRIVY_VERSION}"
+          fi
 
       - name: Verify Trivy installation
         run: |
