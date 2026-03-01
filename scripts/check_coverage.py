@@ -30,8 +30,8 @@ if rate + 1e-9 < effective_min:
         print(f"{label}: got {rate:.2f}% | wanted >= {min_cov:.2f}%")
     else:
         print(
-            f"{label}: got {rate:.2f}% | wanted >= {effective_min:.2f}% "
-            f"(target {min_cov:.2f}% - drift {max_drift:.2f}%)"
+            f"{label}: got {rate:.2f}% | target >= {min_cov:.2f}% "
+            f"(drift floor {effective_min:.2f}%)"
         )
     raise SystemExit(1)
 
@@ -39,6 +39,6 @@ if max_drift is None:
     print(f"{label}: got {rate:.2f}% | wanted >= {min_cov:.2f}%")
 else:
     print(
-        f"{label}: got {rate:.2f}% | wanted >= {effective_min:.2f}% "
-        f"(target {min_cov:.2f}% - drift {max_drift:.2f}%)"
+        f"{label}: got {rate:.2f}% | target >= {min_cov:.2f}% "
+        f"(drift floor {effective_min:.2f}%)"
     )
