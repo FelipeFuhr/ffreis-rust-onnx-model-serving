@@ -7,7 +7,7 @@ fn main() {
     println!("cargo:rerun-if-changed=proto/onnx_serving_grpc/inference.proto");
     println!("cargo:rerun-if-env-changed={PROTOC_ENV_KEY}");
 
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .build_server(true)
         .build_client(true)
         .compile_protos(&["proto/onnx_serving_grpc/inference.proto"], &["proto"])
