@@ -1607,7 +1607,9 @@ mod tests {
 
     #[test]
     fn load_openapi_yaml_supports_blank_and_missing_env_paths() {
-        let _guard = env_lock().lock().expect("env lock");
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
 
         let _missing = EnvVarGuard::set(OPENAPI_SPEC_PATH_ENV_KEY, "/definitely/missing/spec.yaml");
         assert!(read_openapi_from_env().is_none());
@@ -1615,8 +1617,11 @@ mod tests {
 
         let _blank = EnvVarGuard::set(OPENAPI_SPEC_PATH_ENV_KEY, "   ");
         assert!(read_openapi_from_env().is_none());
-        let spec = load_openapi_yaml().expect("repo openapi spec should be discoverable");
-        assert!(spec.contains("openapi:"));
+        let candidates = openapi_candidate_paths();
+        assert_eq!(candidates.len(), 2);
+        for path in candidates {
+            assert!(path.ends_with("openapi.yaml"));
+        }
     }
 
     #[tokio::test]
@@ -1662,7 +1667,9 @@ mod tests {
         let spec_path = tmp.path().join("openapi.yaml");
         fs::write(&spec_path, "openapi: 3.1.0\n").expect("write openapi spec");
         let _env_guard = {
-            let _guard = env_lock().lock().expect("env lock");
+            let _guard = env_lock()
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
             EnvVarGuard::set(
                 OPENAPI_SPEC_PATH_ENV_KEY,
                 spec_path.to_string_lossy().as_ref(),

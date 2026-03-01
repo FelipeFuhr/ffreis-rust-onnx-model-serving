@@ -344,7 +344,7 @@ mod tests {
         let _port = EnvVarGuard::set(PORT_ENV_KEY, "50099");
         let http_calls = Arc::new(AtomicUsize::new(0));
         let grpc_calls = Arc::new(AtomicUsize::new(0));
-        let grpc_host = Arc::new(Mutex::new(String::new()));
+        let grpc_host = Arc::new(Mutex::new(String::default()));
         let grpc_port = Arc::new(AtomicUsize::new(0));
         let http_calls_ref = http_calls.clone();
         let grpc_calls_ref = grpc_calls.clone();
@@ -388,7 +388,7 @@ mod tests {
         let _port = EnvVarGuard::remove(PORT_ENV_KEY);
         let http_calls = Arc::new(AtomicUsize::new(0));
         let grpc_calls = Arc::new(AtomicUsize::new(0));
-        let http_host = Arc::new(Mutex::new(String::new()));
+        let http_host = Arc::new(Mutex::new(String::default()));
         let http_port = Arc::new(AtomicUsize::new(0));
         let http_calls_ref = http_calls.clone();
         let grpc_calls_ref = grpc_calls.clone();
