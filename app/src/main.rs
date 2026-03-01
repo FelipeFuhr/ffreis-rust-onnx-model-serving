@@ -318,6 +318,34 @@ mod tests {
         assert_eq!(port.as_deref(), Some("9000"));
     }
 
+    #[test]
+    fn env_var_guard_set_restores_previous_value_on_drop() {
+        let _lock = env_lock().lock().expect("env lock");
+        env::set_var(SERVE_MODE_ENV_KEY, "original");
+        {
+            let _guard = EnvVarGuard::set(SERVE_MODE_ENV_KEY, "temporary");
+            assert_eq!(
+                env::var(SERVE_MODE_ENV_KEY).ok().as_deref(),
+                Some("temporary")
+            );
+        }
+        assert_eq!(
+            env::var(SERVE_MODE_ENV_KEY).ok().as_deref(),
+            Some("original")
+        );
+    }
+
+    #[test]
+    fn env_var_guard_remove_restores_missing_value_on_drop() {
+        let _lock = env_lock().lock().expect("env lock");
+        env::remove_var(PORT_ENV_KEY);
+        {
+            let _guard = EnvVarGuard::remove(PORT_ENV_KEY);
+            assert!(env::var(PORT_ENV_KEY).is_err());
+        }
+        assert!(env::var(PORT_ENV_KEY).is_err());
+    }
+
     #[tokio::test]
     async fn run_with_returns_grpc_server_error() {
         let cfg = AppConfig::default();

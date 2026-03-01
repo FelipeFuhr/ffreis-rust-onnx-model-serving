@@ -361,11 +361,7 @@ impl AppState {
                     .to_string(),
             );
         }
-        let tensors = build_onnx_tensors(
-            &records,
-            onnx_input_map,
-            self.cfg.onnx_dynamic_batch,
-        )?;
+        let tensors = build_onnx_tensors(&records, onnx_input_map, self.cfg.onnx_dynamic_batch)?;
 
         Ok(ParsedInput {
             x: None,
@@ -539,7 +535,10 @@ fn load_json_map(raw: &str) -> Result<HashMap<String, String>, String> {
     let mut out = HashMap::new();
     for (key, val) in object {
         let s = val.as_str().ok_or_else(|| {
-            format!("Expected string value for key '{}' in JSON object mapping", key)
+            format!(
+                "Expected string value for key '{}' in JSON object mapping",
+                key
+            )
         })?;
         out.insert(key.clone(), s.to_string());
     }
