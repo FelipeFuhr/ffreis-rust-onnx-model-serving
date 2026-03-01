@@ -13,7 +13,7 @@ tokio = { version = "1.47.1", features = ["full"] }
 tokio-stream = { version = "0.1.17", features = ["net"] }
 tonic = { version = "0.12.3", features = ["transport"] }
 tract-onnx = "0.21.13"
-uuid = { version = "=1.18.1", features = ["v4"] }
+uuid = { version = "=1.21.0", features = ["v4"] }
 
 [build-dependencies]
 protoc-bin-vendored = "3.2.0"
