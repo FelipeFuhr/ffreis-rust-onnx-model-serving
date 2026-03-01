@@ -1303,6 +1303,32 @@ mod tests {
     }
 
     #[test]
+    fn tensor_to_json_supports_i64_and_higher_dimensions() {
+        let i64_tensor: tract_onnx::prelude::Tensor =
+            tract_onnx::prelude::tract_ndarray::Array1::<i64>::from_vec(vec![1, 2, 3]).into();
+        let i64_json = OnnxAdapter::tensor_to_json(&i64_tensor).expect("i64 tensor json");
+        assert_eq!(i64_json, json!([1, 2, 3]));
+
+        let f32_3d: tract_onnx::prelude::Tensor =
+            tract_onnx::prelude::tract_ndarray::Array3::<f32>::from_shape_vec(
+                (1, 2, 2),
+                vec![1.0, 2.0, 3.0, 4.0],
+            )
+            .expect("3d tensor")
+            .into();
+        let f32_json = OnnxAdapter::tensor_to_json(&f32_3d).expect("f32 tensor json");
+        assert_eq!(f32_json, json!([1.0, 2.0, 3.0, 4.0]));
+    }
+
+    #[test]
+    fn tensor_to_json_rejects_unsupported_dtype() {
+        let bool_tensor: tract_onnx::prelude::Tensor =
+            tract_onnx::prelude::tract_ndarray::Array1::<bool>::from_vec(vec![true, false]).into();
+        let err = OnnxAdapter::tensor_to_json(&bool_tensor).expect_err("bool tensor must fail");
+        assert!(err.contains("unsupported ONNX output tensor dtype"));
+    }
+
+    #[test]
     fn parsed_input_batch_size_validates_tensors() {
         let empty = ParsedInput {
             x: None,

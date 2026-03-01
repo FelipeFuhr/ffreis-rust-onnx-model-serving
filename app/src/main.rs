@@ -91,4 +91,16 @@ mod tests {
         assert_eq!(host, "localhost");
         assert_eq!(port, 50052);
     }
+
+    #[test]
+    fn resolve_runtime_settings_unknown_mode_uses_http_default_port() {
+        let (mode, host, port) = resolve_runtime_settings(
+            Some("custom".to_string()),
+            Some("0.0.0.0".to_string()),
+            None,
+        );
+        assert_eq!(mode, "custom");
+        assert_eq!(host, "0.0.0.0");
+        assert_eq!(port, 8080);
+    }
 }

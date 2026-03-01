@@ -143,3 +143,81 @@ impl AppConfig {
         dir.join(filename)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[test]
+    fn env_helpers_parse_and_fallback() {
+        let _guard = env_lock().lock().expect("env lock");
+
+        let bool_key = "APP_TEST_BOOL";
+        let usize_key = "APP_TEST_USIZE";
+        let f64_key = "APP_TEST_F64";
+
+        env::remove_var(bool_key);
+        env::remove_var(usize_key);
+        env::remove_var(f64_key);
+
+        assert!(env_bool(bool_key, true));
+        assert_eq!(env_usize(usize_key, 7), 7);
+        assert_eq!(env_f64(f64_key, 1.5), 1.5);
+
+        env::set_var(bool_key, "yes");
+        env::set_var(usize_key, "12");
+        env::set_var(f64_key, "2.75");
+        assert!(env_bool(bool_key, false));
+        assert_eq!(env_usize(usize_key, 0), 12);
+        assert_eq!(env_f64(f64_key, 0.0), 2.75);
+
+        env::set_var(bool_key, "no");
+        env::set_var(usize_key, "bad");
+        env::set_var(f64_key, "bad");
+        assert!(!env_bool(bool_key, true));
+        assert_eq!(env_usize(usize_key, 9), 9);
+        assert_eq!(env_f64(f64_key, 3.5), 3.5);
+
+        env::remove_var(bool_key);
+        env::remove_var(usize_key);
+        env::remove_var(f64_key);
+    }
+
+    #[test]
+    fn model_path_uses_default_and_custom_filename() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let default_cfg = AppConfig {
+            model_dir: tmp.path().to_string_lossy().to_string(),
+            model_filename: "".to_string(),
+            ..AppConfig::default()
+        };
+        assert_eq!(default_cfg.model_path(), tmp.path().join("model.onnx"));
+
+        let custom_cfg = AppConfig {
+            model_dir: tmp.path().to_string_lossy().to_string(),
+            model_filename: "custom.onnx".to_string(),
+            ..AppConfig::default()
+        };
+        assert_eq!(custom_cfg.model_path(), tmp.path().join("custom.onnx"));
+    }
+
+    #[test]
+    fn model_path_panics_when_path_is_not_a_directory() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let file_path = tmp.path().join("model_file");
+        fs::write(&file_path, b"x").expect("write test file");
+        let cfg = AppConfig {
+            model_dir: file_path.to_string_lossy().to_string(),
+            ..AppConfig::default()
+        };
+        let panic = std::panic::catch_unwind(|| cfg.model_path());
+        assert!(panic.is_err());
+    }
+}
