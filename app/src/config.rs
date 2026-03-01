@@ -123,26 +123,26 @@ fn env_f64(name: &str, default: f64) -> f64 {
 }
 
 impl AppConfig {
-    pub(crate) fn model_path(&self) -> PathBuf {
+    pub(crate) fn model_path(&self) -> Result<PathBuf, String> {
         let dir = Path::new(&self.model_dir);
         if !dir.exists() {
-            panic!(
+            return Err(format!(
                 "Configured model directory '{}' does not exist",
                 self.model_dir
-            );
+            ));
         }
         if !dir.is_dir() {
-            panic!(
+            return Err(format!(
                 "Configured model path '{}' is not a directory",
                 self.model_dir
-            );
+            ));
         }
         let filename = if self.model_filename.trim().is_empty() {
             "model.onnx".to_string()
         } else {
             self.model_filename.clone()
         };
-        dir.join(filename)
+        Ok(dir.join(filename))
     }
 }
 
@@ -206,18 +206,18 @@ mod tests {
             model_filename: "".to_string(),
             ..AppConfig::default()
         };
-        assert_eq!(default_cfg.model_path(), tmp.path().join("model.onnx"));
+        assert_eq!(default_cfg.model_path(), Ok(tmp.path().join("model.onnx")));
 
         let custom_cfg = AppConfig {
             model_dir: tmp.path().to_string_lossy().to_string(),
             model_filename: "custom.onnx".to_string(),
             ..AppConfig::default()
         };
-        assert_eq!(custom_cfg.model_path(), tmp.path().join("custom.onnx"));
+        assert_eq!(custom_cfg.model_path(), Ok(tmp.path().join("custom.onnx")));
     }
 
     #[test]
-    fn model_path_panics_when_path_is_not_a_directory() {
+    fn model_path_errors_when_path_is_not_a_directory() {
         let tmp = tempfile::tempdir().expect("temp dir");
         let file_path = tmp.path().join("model_file");
         fs::write(&file_path, b"x").expect("write test file");
@@ -225,7 +225,7 @@ mod tests {
             model_dir: file_path.to_string_lossy().to_string(),
             ..AppConfig::default()
         };
-        let panic = std::panic::catch_unwind(|| cfg.model_path());
-        assert!(panic.is_err());
+        let err = cfg.model_path().expect_err("non-directory must fail");
+        assert!(err.contains("not a directory"), "unexpected error: {err}");
     }
 }

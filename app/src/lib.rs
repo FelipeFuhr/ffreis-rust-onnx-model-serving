@@ -122,7 +122,7 @@ struct OnnxAdapter {
 
 impl OnnxAdapter {
     fn new(cfg: AppConfig) -> Result<Self, String> {
-        let path = cfg.model_path();
+        let path = cfg.model_path()?;
         if !path.exists() {
             return Err(format!("ONNX model not found: {}", path.display()));
         }
@@ -150,10 +150,20 @@ impl OnnxAdapter {
             return Ok(rows.clone());
         }
         if let Some(tensors) = &parsed_input.tensors {
+            if tensors.is_empty() {
+                return Err("Parsed input contained no tensors".to_string());
+            }
+            if tensors.len() > 1 {
+                return Err(format!(
+                    "Parsed input contained {} ONNX input tensors, but this adapter \
+                     currently supports only a single input tensor",
+                    tensors.len()
+                ));
+            }
             let first = tensors
                 .values()
                 .next()
-                .ok_or_else(|| "Parsed input contained no tensors".to_string())?;
+                .expect("non-empty map must have a first value");
             return value_to_numeric_rows(first);
         }
         Err("Parsed input contained no features/tensors".to_string())
@@ -260,8 +270,8 @@ impl BaseAdapter for OnnxAdapter {
 }
 
 fn load_adapter(cfg: &AppConfig) -> Result<Arc<dyn BaseAdapter>, String> {
-    let path = cfg.model_path();
-    if cfg.model_type == "onnx" || path.exists() {
+    let model_exists = cfg.model_path().is_ok_and(|p| p.exists());
+    if cfg.model_type == "onnx" || model_exists {
         let adapter = OnnxAdapter::new(cfg.clone())?;
         return Ok(Arc::new(adapter));
     }
@@ -351,12 +361,9 @@ impl AppState {
                     .to_string(),
             );
         }
-        let dtype_map = load_json_map(&self.cfg.onnx_input_dtype_map_json)?;
         let tensors = build_onnx_tensors(
             &records,
             onnx_input_map,
-            &dtype_map,
-            &self.cfg.tabular_dtype,
             self.cfg.onnx_dynamic_batch,
         )?;
 
@@ -490,8 +497,6 @@ fn validate_dynamic_batch_sizes(batch_sizes: &[usize]) -> Result<(), String> {
 fn build_onnx_tensors(
     records: &[HashMap<String, Value>],
     input_map: &HashMap<String, String>,
-    dtype_map: &HashMap<String, String>,
-    default_dtype: &str,
     dynamic_batch: bool,
 ) -> Result<HashMap<String, Value>, String> {
     let mut tensors = HashMap::new();
@@ -508,11 +513,6 @@ fn build_onnx_tensors(
             })?;
             values.push(value.clone());
         }
-        let _dtype_hint = dtype_map
-            .get(request_key)
-            .or_else(|| dtype_map.get(onnx_input_name))
-            .cloned()
-            .unwrap_or_else(|| default_dtype.to_string());
         if dynamic_batch {
             batch_sizes.push(values.len());
         }
@@ -538,7 +538,10 @@ fn load_json_map(raw: &str) -> Result<HashMap<String, String>, String> {
         .ok_or_else(|| "Expected JSON object mapping".to_string())?;
     let mut out = HashMap::new();
     for (key, val) in object {
-        out.insert(key.clone(), val.as_str().unwrap_or("").to_string());
+        let s = val.as_str().ok_or_else(|| {
+            format!("Expected string value for key '{}' in JSON object mapping", key)
+        })?;
+        out.insert(key.clone(), s.to_string());
     }
     Ok(out)
 }
@@ -1109,13 +1112,16 @@ impl grpc::inference_service_server::InferenceService for InferenceGrpcService {
         &self,
         _request: Request<grpc::ReadyRequest>,
     ) -> Result<Response<grpc::StatusReply>, Status> {
-        let ready = self
-            .state
-            .adapter
-            .read()
-            .await
-            .as_ref()
-            .is_some_and(|adapter| adapter.is_ready());
+        let ready = match self.state.ensure_adapter_loaded().await {
+            Ok(_) => self
+                .state
+                .adapter
+                .read()
+                .await
+                .as_ref()
+                .is_some_and(|adapter| adapter.is_ready()),
+            Err(_) => false,
+        };
         Ok(Response::new(grpc::StatusReply {
             ok: ready,
             status: if ready {
@@ -1742,13 +1748,13 @@ mod tests {
     }
 
     #[test]
-    fn app_config_model_path_panics_when_dir_missing_or_not_directory() {
+    fn app_config_model_path_errors_when_dir_missing_or_not_directory() {
         let missing = AppConfig {
             model_dir: "/definitely/missing/dir".to_string(),
             ..AppConfig::default()
         };
-        let missing_panic = std::panic::catch_unwind(|| missing.model_path());
-        assert!(missing_panic.is_err());
+        let err = missing.model_path().expect_err("missing dir must fail");
+        assert!(err.contains("does not exist"), "unexpected error: {err}");
 
         let tmp = tempfile::tempdir().expect("temp dir");
         let file_path = tmp.path().join("model.onnx");
@@ -1757,8 +1763,8 @@ mod tests {
             model_dir: file_path.to_string_lossy().to_string(),
             ..AppConfig::default()
         };
-        let not_dir_panic = std::panic::catch_unwind(|| not_dir.model_path());
-        assert!(not_dir_panic.is_err());
+        let err = not_dir.model_path().expect_err("non-directory must fail");
+        assert!(err.contains("not a directory"), "unexpected error: {err}");
     }
 
     #[test]
