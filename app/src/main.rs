@@ -1,4 +1,6 @@
 use std::env;
+use std::fmt::Display;
+use std::future::Future;
 
 use app::{init_telemetry, run_grpc_server, run_http_server, AppConfig};
 
@@ -19,38 +21,67 @@ fn resolve_runtime_settings(
     (mode, host, port)
 }
 
-#[tokio::main]
-async fn main() {
-    let (mode, host, port) = resolve_runtime_settings(
+async fn run_with<InitFn, HttpFn, GrpcFn, HttpFut, GrpcFut, HttpErr, GrpcErr>(
+    mode_raw: Option<String>,
+    host_raw: Option<String>,
+    port_raw: Option<String>,
+    cfg: AppConfig,
+    init: InitFn,
+    http_runner: HttpFn,
+    grpc_runner: GrpcFn,
+) -> Result<(), String>
+where
+    InitFn: Fn(&AppConfig) -> Result<(), String>,
+    HttpFn: Fn(String, u16, AppConfig) -> HttpFut,
+    GrpcFn: Fn(String, u16, AppConfig) -> GrpcFut,
+    HttpFut: Future<Output = Result<(), HttpErr>>,
+    GrpcFut: Future<Output = Result<(), GrpcErr>>,
+    HttpErr: Display,
+    GrpcErr: Display,
+{
+    let (mode, host, port) = resolve_runtime_settings(mode_raw, host_raw, port_raw);
+    init(&cfg).map_err(|err| format!("telemetry initialization failed: {err}"))?;
+
+    match mode.as_str() {
+        "grpc" => grpc_runner(host, port, cfg)
+            .await
+            .map_err(|err| format!("grpc server failed: {err}"))?,
+        _ => http_runner(host, port, cfg)
+            .await
+            .map_err(|err| format!("http server failed: {err}"))?,
+    }
+    Ok(())
+}
+
+async fn run() -> Result<(), String> {
+    run_with(
         env::var(SERVE_MODE_ENV_KEY).ok(),
         env::var(HOST_ENV_KEY).ok(),
         env::var(PORT_ENV_KEY).ok(),
-    );
-    let cfg = AppConfig::default();
-    if let Err(err) = init_telemetry(&cfg) {
-        eprintln!("telemetry initialization failed: {err}");
-        std::process::exit(1);
-    }
+        AppConfig::default(),
+        init_telemetry,
+        |host, port, cfg| async move { run_http_server(&host, port, cfg).await },
+        |host, port, cfg| async move { run_grpc_server(&host, port, cfg).await },
+    )
+    .await
+}
 
-    match mode.as_str() {
-        "grpc" => {
-            if let Err(err) = run_grpc_server(&host, port, cfg).await {
-                eprintln!("grpc server failed: {err}");
-                std::process::exit(1);
-            }
-        }
-        _ => {
-            if let Err(err) = run_http_server(&host, port, cfg).await {
-                eprintln!("http server failed: {err}");
-                std::process::exit(1);
-            }
-        }
+#[tokio::main]
+async fn main() {
+    if let Err(err) = run().await {
+        eprintln!("{err}");
+        std::process::exit(1);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::resolve_runtime_settings;
+    use super::run_with;
+    use app::AppConfig;
+    use std::io;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     #[test]
     fn resolve_runtime_settings_defaults_to_http() {
@@ -102,5 +133,101 @@ mod tests {
         assert_eq!(mode, "custom");
         assert_eq!(host, "0.0.0.0");
         assert_eq!(port, 8080);
+    }
+
+    #[tokio::test]
+    async fn run_with_calls_http_runner_by_default() {
+        let cfg = AppConfig::default();
+        let http_calls = Arc::new(AtomicUsize::new(0));
+        let grpc_calls = Arc::new(AtomicUsize::new(0));
+        let http_calls_ref = http_calls.clone();
+        let grpc_calls_ref = grpc_calls.clone();
+
+        let result = run_with(
+            None,
+            Some("127.0.0.1".to_string()),
+            Some("8088".to_string()),
+            cfg,
+            |_| Ok(()),
+            move |_, _, _| {
+                http_calls_ref.fetch_add(1, Ordering::SeqCst);
+                async { Ok::<(), io::Error>(()) }
+            },
+            move |_, _, _| {
+                grpc_calls_ref.fetch_add(1, Ordering::SeqCst);
+                async { Ok::<(), io::Error>(()) }
+            },
+        )
+        .await;
+
+        assert!(result.is_ok());
+        assert_eq!(http_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(grpc_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn run_with_calls_grpc_runner_for_grpc_mode() {
+        let cfg = AppConfig::default();
+        let http_calls = Arc::new(AtomicUsize::new(0));
+        let grpc_calls = Arc::new(AtomicUsize::new(0));
+        let http_calls_ref = http_calls.clone();
+        let grpc_calls_ref = grpc_calls.clone();
+
+        let result = run_with(
+            Some("grpc".to_string()),
+            None,
+            None,
+            cfg,
+            |_| Ok(()),
+            move |_, _, _| {
+                http_calls_ref.fetch_add(1, Ordering::SeqCst);
+                async { Ok::<(), io::Error>(()) }
+            },
+            move |_, _, _| {
+                grpc_calls_ref.fetch_add(1, Ordering::SeqCst);
+                async { Ok::<(), io::Error>(()) }
+            },
+        )
+        .await;
+
+        assert!(result.is_ok());
+        assert_eq!(http_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(grpc_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn run_with_returns_telemetry_error() {
+        let cfg = AppConfig::default();
+        let result = run_with(
+            None,
+            None,
+            None,
+            cfg,
+            |_| Err("boom".to_string()),
+            |_, _, _| async { Ok::<(), io::Error>(()) },
+            |_, _, _| async { Ok::<(), io::Error>(()) },
+        )
+        .await;
+
+        let error = result.expect_err("telemetry error expected");
+        assert!(error.contains("telemetry initialization failed"));
+    }
+
+    #[tokio::test]
+    async fn run_with_returns_http_server_error() {
+        let cfg = AppConfig::default();
+        let result = run_with(
+            Some("http".to_string()),
+            None,
+            None,
+            cfg,
+            |_| Ok(()),
+            |_, _, _| async { Err(io::Error::other("bind failed")) },
+            |_, _, _| async { Ok::<(), io::Error>(()) },
+        )
+        .await;
+
+        let error = result.expect_err("http error expected");
+        assert!(error.contains("http server failed"));
     }
 }

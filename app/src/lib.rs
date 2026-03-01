@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::fs;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -39,8 +41,6 @@ const JSON_LINES_CONTENT_TYPES: &[&str] = &[
 const CSV_CONTENT_TYPES: &[&str] = &["text/csv", "application/csv"];
 const SAGEMAKER_CONTENT_TYPE_HEADER: &str = "x-amzn-sagemaker-content-type";
 const SAGEMAKER_ACCEPT_HEADER: &str = "x-amzn-sagemaker-accept";
-const OPENAPI_YAML: &str =
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../docs/openapi.yaml"));
 const SWAGGER_UI_HTML: &str = r##"<!doctype html>
 <html>
 <head>
@@ -779,9 +779,12 @@ async fn http_metrics() -> impl IntoResponse {
 }
 
 async fn http_openapi_spec() -> impl IntoResponse {
+    if let Some(spec) = load_openapi_yaml() {
+        return ([(CONTENT_TYPE, "application/yaml; charset=utf-8")], spec).into_response();
+    }
     (
-        [(CONTENT_TYPE, "application/yaml; charset=utf-8")],
-        OPENAPI_YAML,
+        StatusCode::NOT_FOUND,
+        Json(json!({"error": "openapi_contract_not_found"})),
     )
         .into_response()
 }
@@ -884,6 +887,29 @@ async fn http_invocations(
         }
         Err(err) => (StatusCode::BAD_REQUEST, Json(json!({ "error": err }))).into_response(),
     }
+}
+
+fn load_openapi_yaml() -> Option<String> {
+    if let Ok(path) = std::env::var("OPENAPI_SPEC_PATH") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return fs::read_to_string(trimmed).ok();
+        }
+    }
+
+    let candidates = [
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("docs")
+            .join("openapi.yaml"),
+        PathBuf::from("docs").join("openapi.yaml"),
+    ];
+    for path in candidates {
+        if let Ok(spec) = fs::read_to_string(&path) {
+            return Some(spec);
+        }
+    }
+    None
 }
 
 fn header_value_with_fallback(
