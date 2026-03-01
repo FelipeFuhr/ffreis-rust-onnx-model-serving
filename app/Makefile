@@ -169,3 +169,13 @@ coverage-segment-check: ## Fail if integration/e2e coverage is below thresholds
 	COVERAGE_LABEL="e2e" COVERAGE_MIN="$(E2E_COVERAGE_MIN)" COVERAGE_MAX_DRIFT="$(COVERAGE_SEGMENT_MAX_DRIFT)" \
 		COVERAGE_XML="$(E2E_COVERAGE_XML)" \
 		$(COVERAGE_PYTHON) "$(CHECK_COVERAGE_SCRIPT)"
+
+.PHONY: prepush-check
+prepush-check: ## Run the same quality gates as pre-push in deterministic order
+	$(MAKE) test-unit
+	$(MAKE) test-integration
+	$(MAKE) test-e2e
+	$(MAKE) check-e2e-min E2E_MIN_TESTS="$(E2E_MIN_TESTS)"
+	$(MAKE) coverage-segment-check \
+		INTEGRATION_COVERAGE_MIN="$(INTEGRATION_COVERAGE_MIN)" \
+		E2E_COVERAGE_MIN="$(E2E_COVERAGE_MIN)"

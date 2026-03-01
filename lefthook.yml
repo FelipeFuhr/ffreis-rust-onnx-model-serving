@@ -22,17 +22,5 @@ pre-commit:
 pre-push:
   parallel: false
   commands:
-    unit-tests:
-      run: make -C app test-unit
-
-    integration-tests:
-      run: make -C app test-integration
-
-    e2e-tests:
-      run: make -C app test-e2e
-
-    e2e-min-scenarios:
-      run: make -C app check-e2e-min E2E_MIN_TESTS=3
-
-    coverage-segments:
-      run: make -C app coverage-segment-check INTEGRATION_COVERAGE_MIN=57 E2E_COVERAGE_MIN=45
+    quality-gates:
+      run: make -C app prepush-check INTEGRATION_COVERAGE_MIN=57 E2E_COVERAGE_MIN=45 E2E_MIN_TESTS=3

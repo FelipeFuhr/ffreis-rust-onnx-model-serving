@@ -35,11 +35,28 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b
+        with:
+          enable-cache: true
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
         with:
           toolchain: stable
-      - name: Commit Checks (Lefthook) 
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
         run: |
           set -euo pipefail
-          make lefthook
+          cargo install cargo-llvm-cov --locked
+
+      - name: Install Python deps for coverage scripts
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install defusedxml
+
+      - name: Commit Checks
+        run: |
+          set -euo pipefail
+          make -C app prepush-check INTEGRATION_COVERAGE_MIN=57 E2E_COVERAGE_MIN=45 E2E_MIN_TESTS=3

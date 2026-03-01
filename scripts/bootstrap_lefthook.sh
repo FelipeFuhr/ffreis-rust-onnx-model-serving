@@ -40,6 +40,4 @@ if [ ! -x "$BIN" ]; then
   chmod +x "$BIN"
 fi
 
-echo "Running lefthook hooks..."
-"$BIN" run pre-commit
-"$BIN" run pre-push
+echo "Lefthook available at: $BIN"
