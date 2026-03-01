@@ -44,15 +44,13 @@ jobs:
         run: |
           set -euo pipefail
           TRIVY_VERSION="v0.67.2"
-          INSTALL_URL="https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_VERSION}/contrib/install.sh"
-          FALLBACK_URL="https://raw.githubusercontent.com/aquasecurity/trivy/master/contrib/install.sh"
+          TRIVY_PLAIN="${TRIVY_VERSION#v}"
+          TRIVY_TARBALL="trivy_${TRIVY_PLAIN}_Linux-64bit.tar.gz"
+          TRIVY_URL="https://github.com/aquasecurity/trivy/releases/download/${TRIVY_VERSION}/${TRIVY_TARBALL}"
 
-          if ! curl -sfL --proto '=https' --proto-redir '=https' "${INSTALL_URL}" \
-            | sudo sh -s -- -b /usr/local/bin "${TRIVY_VERSION}"; then
-            echo "Tagged installer URL failed, retrying with master branch installer path..."
-            curl -sfL --proto '=https' --proto-redir '=https' "${FALLBACK_URL}" \
-              | sudo sh -s -- -b /usr/local/bin "${TRIVY_VERSION}"
-          fi
+          curl -fsSL --proto '=https' --proto-redir '=https' "${TRIVY_URL}" -o "${TRIVY_TARBALL}"
+          tar -xzf "${TRIVY_TARBALL}" trivy
+          sudo install -m 0755 trivy /usr/local/bin/trivy
 
       - name: Verify Trivy installation
         run: |
