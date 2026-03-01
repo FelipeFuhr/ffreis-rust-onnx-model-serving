@@ -22,5 +22,5 @@ pre-commit:
 pre-push:
   parallel: false
   commands:
-    tests:
-      run: make -C app test
+    quality-gates:
+      run: make -C app prepush-check INTEGRATION_COVERAGE_MIN=57 E2E_COVERAGE_MIN=45 E2E_MIN_TESTS=3

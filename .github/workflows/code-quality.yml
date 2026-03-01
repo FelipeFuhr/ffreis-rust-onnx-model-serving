@@ -43,7 +43,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p coverage
-          cargo llvm-cov --manifest-path app/Cargo.toml --all-features --workspace --tests --bins \
+          cargo llvm-cov --manifest-path app/Cargo.toml --all-features --workspace --all-targets \
             --lcov --output-path coverage/lcov.info
           test -s coverage/lcov.info
 

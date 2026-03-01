@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - "app/**"
+      - "scripts/check_e2e_tests.py"
       - "Makefile"
       - "rust-toolchain.toml"
       - ".github/workflows/build-all.yml"
@@ -12,6 +13,7 @@ on:
     branches: [ main ]
     paths:
       - "app/**"
+      - "scripts/check_e2e_tests.py"
       - "Makefile"
       - "rust-toolchain.toml"
       - ".github/workflows/build-all.yml"
@@ -80,6 +82,8 @@ jobs:
       - name: Run integration tests
         run: |
           set -euo pipefail
+          make grpc-check
+          make test-grpc-parity
           make -C app test-integration
 
   e2e-smoke:
@@ -100,6 +104,10 @@ jobs:
         run: |
           set -euo pipefail
           make -C app test-e2e
+      - name: Enforce minimum e2e scenarios
+        run: |
+          set -euo pipefail
+          make -C app check-e2e-min E2E_MIN_TESTS=3
 
   container-smoke:
     needs: matrix-build

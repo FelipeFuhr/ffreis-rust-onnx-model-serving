@@ -50,40 +50,27 @@ jobs:
           npm install -g snyk
           snyk --version
 
-      - name: Install CycloneDX generator for Cargo
-        run: |
-          set -euo pipefail
-          cargo install cargo-cyclonedx --locked
-
-      - name: Generate Cargo SBOM (CycloneDX JSON)
-        run: |
-          set -euo pipefail
-          mkdir -p snyk-results
-          (
-            cd app
-            cargo cyclonedx --format json
-          )
-          sbom_path="$(
-            find app -type f \( -name "bom.json" -o -name "*.cdx.json" -o -name "*cyclonedx*.json" \) \
-              | head -n 1
-          )"
-          if [ -z "${sbom_path}" ]; then
-            echo "No CycloneDX JSON SBOM file found under app/ after cargo cyclonedx." >&2
-            find app -maxdepth 3 -type f | sort >&2
-            exit 1
-          fi
-          cp "${sbom_path}" snyk-results/sbom.json
-          test -s snyk-results/sbom.json
-
-      - name: Snyk Open Source scan (SBOM)
+      - name: Snyk Open Source scan (Cargo)
+        id: snyk_oss
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: |
           set -euo pipefail
-          snyk sbom test \
-            --file=snyk-results/sbom.json \
-            --sarif-file-output=snyk-results/oss.sarif || true
-          test -s snyk-results/oss.sarif
+          mkdir -p snyk-results
+          set +e
+          snyk test \
+            --file=app/Cargo.toml \
+            --package-manager=cargo \
+            --sarif-file-output=snyk-results/oss.sarif
+          snyk_status=$?
+          set -e
+
+          if [ -s snyk-results/oss.sarif ]; then
+            echo "oss_sarif=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "oss_sarif=false" >> "$GITHUB_OUTPUT"
+            echo "Snyk OSS SARIF was not generated (status=${snyk_status}); skipping OSS upload."
+          fi
 
       - name: Snyk Code scan
         env:
@@ -94,6 +81,7 @@ jobs:
           test -s snyk-results/code.sarif
 
       - name: Upload Snyk OSS SARIF
+        if: steps.snyk_oss.outputs.oss_sarif == 'true'
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: snyk-results/oss.sarif

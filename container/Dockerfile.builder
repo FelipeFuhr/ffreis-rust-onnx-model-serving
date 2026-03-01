@@ -1,4 +1,5 @@
-FROM ffreis/base-builder
+ARG BASE_BUILDER_IMAGE=ffreis/base-builder
+FROM ${BASE_BUILDER_IMAGE}
 
 USER root
 
@@ -14,7 +15,7 @@ COPY --chown=appuser:appgroup app/ .
 
 USER appuser:appgroup
 
-RUN cargo test --verbose
+RUN cargo test --verbose --locked
 
-ENTRYPOINT ["cargo", "build"]
+ENTRYPOINT ["cargo", "build", "--locked"]
 CMD ["--release"]

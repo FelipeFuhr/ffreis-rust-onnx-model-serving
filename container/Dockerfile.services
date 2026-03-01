@@ -1,0 +1,17 @@
+FROM docker.io/library/rust:1.88-slim AS builder
+
+WORKDIR /app
+COPY app/Cargo.toml app/Cargo.lock app/build.rs /app/
+COPY app/proto /app/proto
+COPY app/src /app/src
+RUN cargo build --release --locked
+
+FROM docker.io/library/debian:bookworm-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/target/release/app /usr/local/bin/app
+
+ENTRYPOINT ["/usr/local/bin/app"]

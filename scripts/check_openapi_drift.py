@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+"""Fail when HTTP API implementation changes without OpenAPI updates."""
+
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+OPENAPI_FILE = "docs/openapi.yaml"
+API_CONTRACT_SOURCES = (
+    "app/src/lib.rs",
+)
+
+
+def _git_changed_files(base: str, head: str) -> list[str]:
+    result = subprocess.run(
+        ["git", "diff", "--name-only", f"{base}..{head}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _matches_prefix(path: str, prefix: str) -> bool:
+    return path == prefix or path.startswith(f"{prefix.rstrip('/')}/")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base", required=True, help="Base commit SHA")
+    parser.add_argument("--head", required=True, help="Head commit SHA")
+    args = parser.parse_args()
+
+    try:
+        changed = _git_changed_files(args.base, args.head)
+    except subprocess.CalledProcessError as exc:
+        print(f"Failed to diff commits {args.base}..{args.head}: {exc}", file=sys.stderr)
+        return 1
+
+    api_changed = any(
+        any(_matches_prefix(path, src) for src in API_CONTRACT_SOURCES) for path in changed
+    )
+    openapi_changed = any(_matches_prefix(path, OPENAPI_FILE) for path in changed)
+
+    if api_changed and not openapi_changed:
+        print("OpenAPI drift check failed.", file=sys.stderr)
+        print(
+            "Detected API implementation changes in app/src/lib.rs "
+            "without updating docs/openapi.yaml.",
+            file=sys.stderr,
+        )
+        print("If the HTTP contract changed, update OpenAPI accordingly.", file=sys.stderr)
+        print(
+            "If it did not change, include a no-op/docs update or adjust the drift rules.",
+            file=sys.stderr,
+        )
+        return 1
+
+    spec_exists = (REPO_ROOT / OPENAPI_FILE).exists()
+    if not spec_exists:
+        print(f"Required OpenAPI file not found: {OPENAPI_FILE}", file=sys.stderr)
+        return 1
+
+    print("OpenAPI drift check passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

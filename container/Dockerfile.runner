@@ -1,4 +1,5 @@
-FROM ffreis/base-runner
+ARG BASE_RUNNER_IMAGE=ffreis/base-runner
+FROM ${BASE_RUNNER_IMAGE}
 
 ARG APP_NAME=__APP_NAME__
 ENV APP_NAME=${APP_NAME}

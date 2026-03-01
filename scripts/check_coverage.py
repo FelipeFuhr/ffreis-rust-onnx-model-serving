@@ -3,7 +3,10 @@ import sys
 from defusedxml import ElementTree as ET
 
 min_cov = float(os.environ.get("COVERAGE_MIN", "90"))
+max_drift_raw = os.environ.get("COVERAGE_MAX_DRIFT", "").strip()
+max_drift = float(max_drift_raw) if max_drift_raw else None
 path = os.environ.get("COVERAGE_XML", "../coverage/cobertura.xml")
+label = os.environ.get("COVERAGE_LABEL", "coverage")
 
 try:
     tree = ET.parse(path)
@@ -21,8 +24,21 @@ if rate_attr is None:
     raise SystemExit(2)
 
 rate = float(rate_attr) * 100.0
-if rate + 1e-9 < min_cov:
-    print(f"Coverage {rate:.2f}% is below minimum {min_cov:.2f}%")
+effective_min = min_cov - max_drift if max_drift is not None else min_cov
+if rate + 1e-9 < effective_min:
+    if max_drift is None:
+        print(f"{label}: got {rate:.2f}% | wanted >= {min_cov:.2f}%")
+    else:
+        print(
+            f"{label}: got {rate:.2f}% | target >= {min_cov:.2f}% "
+            f"(drift floor {effective_min:.2f}%)"
+        )
     raise SystemExit(1)
 
-print(f"Coverage {rate:.2f}% meets minimum {min_cov:.2f}%")
+if max_drift is None:
+    print(f"{label}: got {rate:.2f}% | wanted >= {min_cov:.2f}%")
+else:
+    print(
+        f"{label}: got {rate:.2f}% | target >= {min_cov:.2f}% "
+        f"(drift floor {effective_min:.2f}%)"
+    )

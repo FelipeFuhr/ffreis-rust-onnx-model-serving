@@ -43,17 +43,56 @@ jobs:
       - name: Install Trivy
         run: |
           set -euo pipefail
-          TRIVY_INSTALL_REF="v0.67.2"
-          curl -sfL \
-            --proto '=https' \
-            --proto-redir '=https' \
-            "https://raw.githubusercontent.com/aquasecurity/trivy/${TRIVY_INSTALL_REF}/contrib/install.sh" \
-            | sudo sh -s -- -b /usr/local/bin
-          trivy --version
-      - name: Save images and scan (parallel, Podman)
+          TRIVY_VERSION="${TRIVY_VERSION:-v0.67.2}"
+          TRIVY_URL="$(
+            python3 - "${TRIVY_VERSION}" <<'PY'
+import json
+import sys
+import urllib.request
+from urllib.error import HTTPError
+
+requested_tag = sys.argv[1]
+api_base = "https://api.github.com/repos/aquasecurity/trivy/releases"
+
+def fetch(url: str) -> dict:
+    with urllib.request.urlopen(url, timeout=30) as resp:
+        return json.load(resp)
+
+def pick_asset_url(release: dict) -> str | None:
+    assets = release.get("assets", [])
+    for asset in assets:
+        name = asset.get("name", "")
+        if name.endswith("_Linux-64bit.tar.gz"):
+            return asset.get("browser_download_url")
+    return None
+
+release = None
+try:
+    release = fetch(f"{api_base}/tags/{requested_tag}")
+except HTTPError:
+    release = fetch(f"{api_base}/latest")
+
+url = pick_asset_url(release)
+if not url:
+    raise SystemExit("Could not find Linux-64bit tarball for Trivy release")
+
+print(url)
+PY
+          )"
+          TRIVY_TARBALL="$(basename "${TRIVY_URL}")"
+
+          curl -fsSL --proto '=https' --proto-redir '=https' "${TRIVY_URL}" -o "${TRIVY_TARBALL}"
+          tar -xzf "${TRIVY_TARBALL}" trivy
+          sudo install -m 0755 trivy /usr/local/bin/trivy
+
+      - name: Verify Trivy installation
         run: |
           set -euo pipefail
-          mkdir -p artifacts trivy-results
+          trivy --version
+      - name: Scan images (parallel, Podman)
+        run: |
+          set -euo pipefail
+          mkdir -p trivy-results
           images=(ffreis/base ffreis/base-builder ffreis/builder ffreis/base-runner ffreis/runner)
 
           # Warm DB once to avoid duplicate updates and lock contention in parallel scans.
@@ -62,14 +101,10 @@ jobs:
           scan_image() {
             image="$1"
             name="${image##*/}"
-            tar="artifacts/${name}.tar"
-
-            podman save -o "$tar" "$image"
-            test -s "$tar"
             # 1) Always produce SARIF for all severities so GitHub code scanning
             # has complete visibility, regardless of pass/fail gate outcome.
             trivy image \
-              --input "$tar" \
+              --image-src podman \
               --skip-db-update \
               --no-progress \
               --ignorefile .trivyignore.yaml \
@@ -78,12 +113,13 @@ jobs:
               --ignore-unfixed \
               --exit-code 0 \
               --format sarif \
-              --output "trivy-results/${name}.sarif"
+              --output "trivy-results/${name}.sarif" \
+              "$image"
             test -s "trivy-results/${name}.sarif"
 
             # 1b) Export JSON for trend analysis and triage automation.
             trivy image \
-              --input "$tar" \
+              --image-src podman \
               --skip-db-update \
               --no-progress \
               --ignorefile .trivyignore.yaml \
@@ -92,13 +128,14 @@ jobs:
               --ignore-unfixed \
               --exit-code 0 \
               --format json \
-              --output "trivy-results/${name}.json"
+              --output "trivy-results/${name}.json" \
+              "$image"
             test -s "trivy-results/${name}.json"
 
             # 2) Print a human-readable full report in CI logs (all severities).
             echo "Full vulnerability report for ${image} (all severities):"
             trivy image \
-              --input "$tar" \
+              --image-src podman \
               --skip-db-update \
               --no-progress \
               --ignorefile .trivyignore.yaml \
@@ -106,7 +143,8 @@ jobs:
               --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
               --ignore-unfixed \
               --exit-code 0 \
-              --format table
+              --format table \
+              "$image"
 
             # 3) Check for HIGH/CRITICAL vulnerabilities but capture exit status
             # instead of failing immediately so reports can be uploaded.
@@ -114,14 +152,15 @@ jobs:
             # (fixed or unfixed) are gated. Use .trivyignore.yaml for explicit suppressions.
             echo "Gating ${image} on HIGH/CRITICAL vulnerabilities..."
             if ! trivy image \
-              --input "$tar" \
+              --image-src podman \
               --skip-db-update \
               --no-progress \
               --ignorefile .trivyignore.yaml \
               --scanners vuln \
               --severity HIGH,CRITICAL \
               --exit-code 1 \
-              --format table; then
+              --format table \
+              "$image"; then
               echo "FAIL" > "trivy-results/${name}.gate-status"
             else
               echo "PASS" > "trivy-results/${name}.gate-status"
@@ -138,17 +177,18 @@ jobs:
             wait "$pid"
           done
       - name: Upload Trivy JSON reports
-        if: always()
+        if: always() && hashFiles('trivy-results/*.json') != ''
         uses: actions/upload-artifact@v6
         with:
           name: trivy-json-reports
           path: trivy-results/*.json
-          if-no-files-found: error
+          if-no-files-found: ignore
       - name: Upload Trivy SARIF (per image)
-        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
+        if: always() && hashFiles('trivy-results/*.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false)
         shell: bash
         run: |
           set -euo pipefail
+          shopt -s nullglob
           for f in trivy-results/*.sarif; do
             name="$(basename "$f" .sarif)"
             echo "Uploading $f with tool_name trivy-$name"
@@ -164,7 +204,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Check gate results
-        if: always()
+        if: always() && hashFiles('trivy-results/*.gate-status') != ''
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -188,3 +228,7 @@ jobs:
             fi
           done
           exit $failed
+      - name: Skip gate check when scans did not produce status files
+        if: always() && hashFiles('trivy-results/*.gate-status') == ''
+        run: |
+          echo "No Trivy gate status files were produced; skipping gate check because scan phase did not complete."

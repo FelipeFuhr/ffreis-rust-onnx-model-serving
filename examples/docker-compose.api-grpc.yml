@@ -1,0 +1,39 @@
+services:
+  serving-api:
+    build:
+      context: ..
+      dockerfile: container/Dockerfile.services
+    image: ${IMAGE_ROOT:-ffreis}-rust-onnx-model-serving:${IMAGE_TAG:-api-grpc-smoke}
+    environment:
+      SERVE_MODE: http
+      HOST: 0.0.0.0
+      PORT: "8080"
+    ports:
+      - "18080:8080"
+    volumes:
+      - ../app/tests/fixtures:/opt/ml/model:ro
+
+  serving-grpc:
+    image: ${IMAGE_ROOT:-ffreis}-rust-onnx-model-serving:${IMAGE_TAG:-api-grpc-smoke}
+    environment:
+      SERVE_MODE: grpc
+      HOST: 0.0.0.0
+      PORT: "50052"
+    ports:
+      - "15052:50052"
+    volumes:
+      - ../app/tests/fixtures:/opt/ml/model:ro
+
+  smoke:
+    image: python:3.13-slim
+    depends_on:
+      - serving-api
+      - serving-grpc
+    working_dir: /work
+    volumes:
+      - ../:/work
+    environment:
+      API_BASE: http://serving-api:8080
+      GRPC_TARGET: serving-grpc:50052
+    command: >
+      sh -lc "pip install --no-cache-dir grpcio && python examples/smoke_api_grpc.py"
