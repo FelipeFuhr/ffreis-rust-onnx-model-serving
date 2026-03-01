@@ -381,3 +381,107 @@ async fn payload_too_large_returns_413() {
 
     http_handle.abort();
 }
+
+#[tokio::test]
+async fn swagger_routes_respect_toggle_flag() {
+    let (_tmp, mut cfg) = build_cfg_with_temp_model();
+    let (http_base_off, http_handle_off) = start_http_server(cfg.clone()).await;
+    let client = reqwest::Client::new();
+    let docs_off = client
+        .get(format!("{http_base_off}/docs"))
+        .send()
+        .await
+        .expect("docs off response");
+    let openapi_off = client
+        .get(format!("{http_base_off}/openapi.yaml"))
+        .send()
+        .await
+        .expect("openapi off response");
+    assert_eq!(docs_off.status(), reqwest::StatusCode::NOT_FOUND);
+    assert_eq!(openapi_off.status(), reqwest::StatusCode::NOT_FOUND);
+    http_handle_off.abort();
+
+    cfg.swagger_enabled = true;
+    let (http_base_on, http_handle_on) = start_http_server(cfg).await;
+    let docs_on = client
+        .get(format!("{http_base_on}/docs"))
+        .send()
+        .await
+        .expect("docs on response");
+    let openapi_on = client
+        .get(format!("{http_base_on}/openapi.yaml"))
+        .send()
+        .await
+        .expect("openapi on response");
+    assert_eq!(docs_on.status(), reqwest::StatusCode::OK);
+    assert_eq!(openapi_on.status(), reqwest::StatusCode::OK);
+    http_handle_on.abort();
+}
+
+#[tokio::test]
+async fn multi_input_missing_key_maps_to_http_400_and_grpc_invalid_argument() {
+    let (_tmp, mut cfg) = build_cfg_with_temp_model();
+    cfg.onnx_input_map_json = r#"{"a":"input_a","b":"input_b"}"#.to_string();
+    let (http_base, http_handle) = start_http_server(cfg.clone()).await;
+    let (grpc_url, grpc_handle) = start_grpc_server(cfg).await;
+
+    let payload = br#"{"instances":[{"a":[1.0,2.0]}]}"#.to_vec();
+    let client = reqwest::Client::new();
+    let http_response = client
+        .post(format!("{http_base}/invocations"))
+        .header("content-type", "application/json")
+        .header("accept", "application/json")
+        .body(payload.clone())
+        .send()
+        .await
+        .expect("http response");
+    assert_eq!(http_response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let http_error: serde_json::Value = http_response.json().await.expect("json body");
+    assert!(http_error["error"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("Missing key 'b'"));
+
+    let mut grpc_client = retry_grpc_connect(grpc_url)
+        .await
+        .expect("gRPC client should connect after retries");
+    let grpc_error = grpc_client
+        .predict(PredictRequest {
+            payload,
+            content_type: "application/json".to_string(),
+            accept: "application/json".to_string(),
+        })
+        .await
+        .expect_err("grpc should reject missing key");
+    assert_eq!(grpc_error.code(), tonic::Code::InvalidArgument);
+    assert!(grpc_error.message().contains("Missing key 'b'"));
+
+    http_handle.abort();
+    grpc_handle.abort();
+}
+
+#[tokio::test]
+async fn readiness_endpoints_return_500_when_model_dir_missing() {
+    let cfg = AppConfig {
+        model_type: "onnx".to_string(),
+        model_dir: "/definitely/missing/dir".to_string(),
+        model_filename: "model.onnx".to_string(),
+        ..AppConfig::default()
+    };
+    let (http_base, http_handle) = start_http_server(cfg).await;
+    let client = reqwest::Client::new();
+
+    for path in ["/ready", "/readyz", "/ping"] {
+        let response = client
+            .get(format!("{http_base}{path}"))
+            .send()
+            .await
+            .expect("readiness response");
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    http_handle.abort();
+}

@@ -1117,11 +1117,41 @@ mod tests {
     use axum::body::Bytes;
     use axum::http::HeaderValue;
     use proptest::prelude::*;
+    use std::env;
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
     use tokio::sync::{RwLock, Semaphore};
     use tonic::Request;
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = env::var(key).ok();
+            env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                env::set_var(self.key, previous);
+            } else {
+                env::remove_var(self.key);
+            }
+        }
+    }
 
     fn cfg_with_temp_model_fixture() -> (TempDir, AppConfig) {
         let tmp = tempfile::tempdir().expect("temp dir");
@@ -1374,6 +1404,17 @@ mod tests {
 
     #[tokio::test]
     async fn swagger_handlers_serve_openapi_and_ui() {
+        let _env_guard = {
+            let _guard = env_lock().lock().expect("env lock");
+            let tmp = tempfile::tempdir().expect("temp dir");
+            let spec_path = tmp.path().join("openapi.yaml");
+            fs::write(&spec_path, "openapi: 3.1.0\n").expect("write openapi spec");
+            EnvVarGuard::set(
+                OPENAPI_SPEC_PATH_ENV_KEY,
+                spec_path.to_string_lossy().as_ref(),
+            )
+        };
+
         let spec_response = http_openapi_spec().await.into_response();
         assert_eq!(spec_response.status(), StatusCode::OK);
         let spec_body = to_bytes(spec_response.into_body(), usize::MAX)
