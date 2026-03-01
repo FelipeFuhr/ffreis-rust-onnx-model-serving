@@ -1404,11 +1404,11 @@ mod tests {
 
     #[tokio::test]
     async fn swagger_handlers_serve_openapi_and_ui() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let spec_path = tmp.path().join("openapi.yaml");
+        fs::write(&spec_path, "openapi: 3.1.0\n").expect("write openapi spec");
         let _env_guard = {
             let _guard = env_lock().lock().expect("env lock");
-            let tmp = tempfile::tempdir().expect("temp dir");
-            let spec_path = tmp.path().join("openapi.yaml");
-            fs::write(&spec_path, "openapi: 3.1.0\n").expect("write openapi spec");
             EnvVarGuard::set(
                 OPENAPI_SPEC_PATH_ENV_KEY,
                 spec_path.to_string_lossy().as_ref(),
