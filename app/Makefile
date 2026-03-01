@@ -8,6 +8,7 @@ SHELL := /usr/bin/env bash
 
 CARGO ?= cargo
 PYTHON ?= python3
+CARGO_LOCKED ?= --locked
 
 COVERAGE_MIN ?= 90
 ROOT_DIR ?= $(abspath ..)
@@ -37,7 +38,7 @@ fmt-check: ## Check Rust formatting
 
 .PHONY: clippy
 clippy: ## Run clippy lints
-	$(CARGO) clippy --all-targets --all-features -- -D warnings
+	$(CARGO) clippy $(CARGO_LOCKED) --all-targets --all-features -- -D warnings
 
 .PHONY: lint
 lint: fmt-check clippy ## Run format check and clippy
@@ -48,11 +49,11 @@ lint: fmt-check clippy ## Run format check and clippy
 
 .PHONY: grpc-check
 grpc-check: ## Verify protobuf/gRPC contract compiles
-	$(CARGO) check --verbose
+	$(CARGO) check $(CARGO_LOCKED) --verbose
 
 .PHONY: test-grpc-parity
 test-grpc-parity: ## Run HTTP/gRPC parity integration tests
-	$(CARGO) test --test integration_tests --verbose
+	$(CARGO) test $(CARGO_LOCKED) --test integration_tests --verbose
 
 # ------------------------------------------------------------------------------
 # Build & test
@@ -60,35 +61,35 @@ test-grpc-parity: ## Run HTTP/gRPC parity integration tests
 
 .PHONY: build
 build: ## Build the app
-	$(CARGO) build --verbose
+	$(CARGO) build $(CARGO_LOCKED) --verbose
 
 .PHONY: test
 test: ## Run tests
-	$(CARGO) test --verbose
+	$(CARGO) test $(CARGO_LOCKED) --verbose
 
 .PHONY: test-unit
 test-unit: ## Run unit tests only (src/*)
-	$(CARGO) test --lib --verbose
+	$(CARGO) test $(CARGO_LOCKED) --lib --verbose
 
 .PHONY: test-integration
 test-integration: ## Run integration tests only (tests/integration/*)
-	$(CARGO) test --test integration_tests --verbose
+	$(CARGO) test $(CARGO_LOCKED) --test integration_tests --verbose
 
 .PHONY: test-property
 test-property: ## Run property-based tests (proptest) in unit test module
 	@if [ -n "$(PROPTEST_CASES)" ]; then \
-		PROPTEST_CASES="$(PROPTEST_CASES)" $(CARGO) test --lib property_ --verbose; \
+		PROPTEST_CASES="$(PROPTEST_CASES)" $(CARGO) test $(CARGO_LOCKED) --lib property_ --verbose; \
 	else \
-		$(CARGO) test --lib property_ --verbose; \
+		$(CARGO) test $(CARGO_LOCKED) --lib property_ --verbose; \
 	fi
 
 .PHONY: test-e2e
 test-e2e: ## Run e2e/ML scaffold tests (ignored tests are not run by default)
-	$(CARGO) test --test e2e_tests --verbose
+	$(CARGO) test $(CARGO_LOCKED) --test e2e_tests --verbose
 
 .PHONY: test-e2e-ignored
 test-e2e-ignored: ## Run ignored e2e/ML tests (requires external fixtures)
-	$(CARGO) test --test e2e_tests -- --ignored --nocapture
+	$(CARGO) test $(CARGO_LOCKED) --test e2e_tests -- --ignored --nocapture
 
 .PHONY: clean
 clean: ## Clean Rust build artifacts

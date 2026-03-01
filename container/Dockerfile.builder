@@ -15,7 +15,7 @@ COPY --chown=appuser:appgroup app/ .
 
 USER appuser:appgroup
 
-RUN cargo test --verbose
+RUN cargo test --verbose --locked
 
-ENTRYPOINT ["cargo", "build"]
+ENTRYPOINT ["cargo", "build", "--locked"]
 CMD ["--release"]

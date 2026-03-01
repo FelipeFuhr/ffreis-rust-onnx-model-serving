@@ -68,4 +68,4 @@ jobs:
         run: |
           set -euo pipefail
           cargo install cargo-audit --locked
-          cargo audit --config audit.toml
+          cargo audit --ignore RUSTSEC-2026-0009

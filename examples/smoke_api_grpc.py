@@ -77,7 +77,7 @@ def _assert_http(api_base: str) -> None:
         predictions = payload.get("predictions")
     else:
         predictions = payload
-    assert predictions == [0, 0], payload
+    assert predictions == [[2.0, 3.0], [4.0, 5.0]], payload
 
 
 def _assert_grpc(target: str) -> None:

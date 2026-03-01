@@ -4,7 +4,7 @@ WORKDIR /app
 COPY app/Cargo.toml app/Cargo.lock app/build.rs /app/
 COPY app/proto /app/proto
 COPY app/src /app/src
-RUN cargo build --release
+RUN cargo build --release --locked
 
 FROM docker.io/library/debian:bookworm-slim
 

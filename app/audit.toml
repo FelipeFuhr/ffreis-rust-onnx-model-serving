@@ -1,7 +1,0 @@
-[advisories]
-# Temporary exception: time <0.3.47 is pulled transitively via tract/liquid.
-# We currently keep Rust 1.80 compatibility in CI, which prevents upgrading
-# to the fixed time release line without broader dependency/toolchain changes.
-# Remove this ignore once tract/liquid can resolve to a fixed, Rust-1.80-compatible
-# time version (or when the repository MSRV is raised).
-ignore = ["RUSTSEC-2026-0009"]
