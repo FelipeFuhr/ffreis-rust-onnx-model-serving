@@ -6,6 +6,7 @@ use std::{fs, path::PathBuf};
 
 use app::grpc::inference_service_client::InferenceServiceClient;
 use app::grpc::PredictRequest;
+use app::{serve_http, AppConfig};
 
 fn free_port() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
@@ -245,4 +246,56 @@ fn binary_returns_413_when_payload_too_large() {
     assert_eq!(response.status(), reqwest::StatusCode::PAYLOAD_TOO_LARGE);
 
     stop_child_gracefully(&mut child);
+}
+
+#[tokio::test]
+async fn inprocess_http_server_handles_health_and_invocations() {
+    let model_dir = make_temp_model_dir();
+    let cfg = AppConfig {
+        model_type: "onnx".to_string(),
+        model_dir: model_dir.path().to_string_lossy().to_string(),
+        model_filename: "model.onnx".to_string(),
+        max_records: 1000,
+        ..AppConfig::default()
+    };
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind ephemeral http port");
+    let addr = listener.local_addr().expect("local addr");
+    let handle = tokio::spawn(serve_http(listener, cfg));
+
+    let client = reqwest::Client::new();
+    for _ in 0..60 {
+        let ok = client
+            .get(format!("http://{addr}/readyz"))
+            .send()
+            .await
+            .map(|r| r.status() == reqwest::StatusCode::OK)
+            .unwrap_or(false);
+        if ok {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+
+    let health = client
+        .get(format!("http://{addr}/healthz"))
+        .send()
+        .await
+        .expect("health response");
+    assert_eq!(health.status(), reqwest::StatusCode::OK);
+
+    let predict = client
+        .post(format!("http://{addr}/invocations"))
+        .header("content-type", "application/json")
+        .header("accept", "application/json")
+        .body(br#"{"instances":[[1.0,2.0],[3.0,4.0]]}"#.to_vec())
+        .send()
+        .await
+        .expect("predict response");
+    assert_eq!(predict.status(), reqwest::StatusCode::OK);
+    assert!(!predict.bytes().await.expect("predict bytes").is_empty());
+
+    handle.abort();
 }
