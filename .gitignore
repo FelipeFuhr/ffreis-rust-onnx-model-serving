@@ -22,3 +22,10 @@ __pycache__/
 venv/
 env/
 **/__pycache__/
+
+# Coverage artifacts
+coverage/
+.coverage
+.coverage.*
+coverage.xml
+lcov.info
