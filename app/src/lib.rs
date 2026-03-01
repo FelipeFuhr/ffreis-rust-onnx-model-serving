@@ -156,49 +156,33 @@ impl OnnxAdapter {
         Ok(arr.into())
     }
 
+    fn array_view_to_json<T, F>(
+        view: tract_onnx::prelude::tract_ndarray::ArrayViewD<'_, T>,
+        to_value: F,
+    ) -> Value
+    where
+        T: Copy,
+        F: Fn(T) -> Value + Copy,
+    {
+        if view.ndim() == 1 {
+            return Value::Array(view.iter().copied().map(to_value).collect::<Vec<Value>>());
+        }
+        if view.ndim() == 2 {
+            let rows = view
+                .outer_iter()
+                .map(|row| Value::Array(row.iter().copied().map(to_value).collect::<Vec<Value>>()))
+                .collect::<Vec<Value>>();
+            return Value::Array(rows);
+        }
+        Value::Array(view.iter().copied().map(to_value).collect::<Vec<Value>>())
+    }
+
     fn tensor_to_json(tensor: &tract_onnx::prelude::Tensor) -> Result<Value, String> {
         if let Ok(view) = tensor.to_array_view::<f32>() {
-            if view.ndim() == 1 {
-                let values = view
-                    .iter()
-                    .map(|v| Value::from(*v as f64))
-                    .collect::<Vec<Value>>();
-                return Ok(Value::Array(values));
-            }
-            if view.ndim() == 2 {
-                let mut rows = Vec::new();
-                for row in view.outer_iter() {
-                    rows.push(Value::Array(
-                        row.iter()
-                            .map(|v| Value::from(*v as f64))
-                            .collect::<Vec<Value>>(),
-                    ));
-                }
-                return Ok(Value::Array(rows));
-            }
-            return Ok(Value::Array(
-                view.iter()
-                    .map(|v| Value::from(*v as f64))
-                    .collect::<Vec<Value>>(),
-            ));
+            return Ok(Self::array_view_to_json(view, |v| Value::from(v as f64)));
         }
         if let Ok(view) = tensor.to_array_view::<i64>() {
-            if view.ndim() == 1 {
-                let values = view.iter().map(|v| Value::from(*v)).collect::<Vec<Value>>();
-                return Ok(Value::Array(values));
-            }
-            if view.ndim() == 2 {
-                let mut rows = Vec::new();
-                for row in view.outer_iter() {
-                    rows.push(Value::Array(
-                        row.iter().map(|v| Value::from(*v)).collect::<Vec<Value>>(),
-                    ));
-                }
-                return Ok(Value::Array(rows));
-            }
-            return Ok(Value::Array(
-                view.iter().map(|v| Value::from(*v)).collect::<Vec<Value>>(),
-            ));
+            return Ok(Self::array_view_to_json(view, Value::from));
         }
         Err("unsupported ONNX output tensor dtype".to_string())
     }
@@ -306,15 +290,7 @@ impl AppState {
             return self.parse_onnx_multi_input(payload, &normalized, &onnx_input_map);
         }
 
-        let mut matrix = if CSV_CONTENT_TYPES.contains(&normalized.as_str()) {
-            parse_csv_rows(payload, &self.cfg)?
-        } else if JSON_CONTENT_TYPES.contains(&normalized.as_str()) {
-            parse_json_rows(payload, &self.cfg)?
-        } else if JSON_LINES_CONTENT_TYPES.contains(&normalized.as_str()) {
-            parse_jsonl_rows(payload, &self.cfg)?
-        } else {
-            return Err(format!("Unsupported Content-Type: {content_type}"));
-        };
+        let mut matrix = self.parse_tabular_matrix(payload, &normalized, content_type)?;
 
         if matrix.is_empty() {
             return Err("Parsed payload is empty".to_string());
@@ -360,6 +336,24 @@ impl AppState {
             tensors: None,
             meta: None,
         })
+    }
+
+    fn parse_tabular_matrix(
+        &self,
+        payload: &[u8],
+        normalized_content_type: &str,
+        raw_content_type: &str,
+    ) -> Result<Vec<Vec<f64>>, String> {
+        if CSV_CONTENT_TYPES.contains(&normalized_content_type) {
+            return parse_csv_rows(payload, &self.cfg);
+        }
+        if JSON_CONTENT_TYPES.contains(&normalized_content_type) {
+            return parse_json_rows(payload, &self.cfg);
+        }
+        if JSON_LINES_CONTENT_TYPES.contains(&normalized_content_type) {
+            return parse_jsonl_rows(payload, &self.cfg);
+        }
+        Err(format!("Unsupported Content-Type: {raw_content_type}"))
     }
 
     fn parse_onnx_multi_input(
