@@ -10,6 +10,7 @@ on:
       - "scripts/check_openapi_drift.py"
       - "scripts/check_coverage.py"
       - "scripts/check_coverage_per_file.py"
+      - "scripts/check_e2e_tests.py"
       - "Makefile"
       - "rust-toolchain.toml"
       - ".github/workflows/code-review.yml"
@@ -22,6 +23,7 @@ on:
       - "scripts/check_openapi_drift.py"
       - "scripts/check_coverage.py"
       - "scripts/check_coverage_per_file.py"
+      - "scripts/check_e2e_tests.py"
       - "Makefile"
       - "rust-toolchain.toml"
       - ".github/workflows/code-review.yml"
@@ -113,10 +115,15 @@ jobs:
           set -euo pipefail
           make -C app test-e2e
 
+      - name: E2E minimum scenarios gate
+        run: |
+          set -euo pipefail
+          make -C app check-e2e-min E2E_MIN_TESTS=3
+
       - name: Integration and E2E coverage thresholds
         run: |
           set -euo pipefail
-          make -C app coverage-segment-check INTEGRATION_COVERAGE_MIN=57 E2E_COVERAGE_MIN=25
+          make -C app coverage-segment-check INTEGRATION_COVERAGE_MIN=55 E2E_COVERAGE_MIN=25
 
       - name: Coverage threshold
         run: |

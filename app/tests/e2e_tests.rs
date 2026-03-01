@@ -4,6 +4,9 @@ use std::thread;
 use std::time::Duration;
 use std::{fs, path::PathBuf};
 
+use app::grpc::inference_service_client::InferenceServiceClient;
+use app::grpc::PredictRequest;
+
 fn free_port() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
     listener.local_addr().expect("local addr").port()
@@ -61,6 +64,16 @@ fn spawn_http_binary(
     cmd.spawn().expect("spawn app binary")
 }
 
+fn spawn_grpc_binary(exe: &str, port: u16, model_dir: &std::path::Path) -> Child {
+    let mut cmd = Command::new(exe);
+    cmd.env("SERVE_MODE", "grpc")
+        .env("HOST", "127.0.0.1")
+        .env("PORT", port.to_string())
+        .env("MODEL_TYPE", "onnx")
+        .env("SM_MODEL_DIR", model_dir.to_string_lossy().to_string());
+    cmd.spawn().expect("spawn app binary")
+}
+
 fn post_json_invocations(port: u16, body: Vec<u8>) -> reqwest::blocking::Response {
     let client = reqwest::blocking::Client::new();
     let url = format!("http://127.0.0.1:{port}/invocations");
@@ -85,6 +98,47 @@ fn binary_starts_http_service_and_answers_healthz() {
     let url = format!("http://127.0.0.1:{port}/healthz");
     let response = reqwest::blocking::get(url).expect("healthz request");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+    stop_child_gracefully(&mut child);
+}
+
+#[test]
+fn binary_handles_grpc_predict_happy_path() {
+    let Some(exe) = option_env!("CARGO_BIN_EXE_app") else {
+        return;
+    };
+    let model_dir = make_temp_model_dir();
+    let port = free_port();
+    let mut child = spawn_grpc_binary(exe, port, model_dir.path());
+
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    let reply = runtime.block_on(async {
+        let endpoint = format!("http://127.0.0.1:{port}");
+        for _ in 0..60 {
+            if let Ok(mut client) = InferenceServiceClient::connect(endpoint.clone()).await {
+                if let Ok(response) = client
+                    .predict(PredictRequest {
+                        payload: br#"{"instances":[[1.0,2.0],[3.0,4.0]]}"#.to_vec(),
+                        content_type: "application/json".to_string(),
+                        accept: "application/json".to_string(),
+                    })
+                    .await
+                {
+                    return response.into_inner();
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("grpc server did not become ready in time");
+    });
+
+    assert_eq!(reply.content_type, "application/json");
+    assert_eq!(
+        reply.metadata.get("batch_size").map(String::as_str),
+        Some("2")
+    );
+    let payload: serde_json::Value = serde_json::from_slice(&reply.body).expect("json body");
+    assert!(payload.is_array(), "prediction body should be a JSON array");
 
     stop_child_gracefully(&mut child);
 }

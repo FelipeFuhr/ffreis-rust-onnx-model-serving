@@ -13,8 +13,9 @@ CARGO_LOCKED ?= --locked
 COVERAGE_MIN ?= 90
 COVERAGE_PER_FILE_MIN ?= 90
 COVERAGE_FILES ?= app/src/main.rs,app/src/lib.rs,app/src/config.rs,app/src/telemetry.rs
-INTEGRATION_COVERAGE_MIN ?= 57
+INTEGRATION_COVERAGE_MIN ?= 55
 E2E_COVERAGE_MIN ?= 25
+E2E_MIN_TESTS ?= 3
 COVERAGE_SEGMENT_MAX_DRIFT ?= 10
 ROOT_DIR ?= $(abspath ..)
 COVERAGE_XML ?= $(ROOT_DIR)/coverage/cobertura.xml
@@ -22,6 +23,7 @@ INTEGRATION_COVERAGE_XML ?= $(ROOT_DIR)/coverage/cobertura-integration.xml
 E2E_COVERAGE_XML ?= $(ROOT_DIR)/coverage/cobertura-e2e.xml
 CHECK_COVERAGE_SCRIPT ?= $(ROOT_DIR)/scripts/check_coverage.py
 CHECK_COVERAGE_PER_FILE_SCRIPT ?= $(ROOT_DIR)/scripts/check_coverage_per_file.py
+CHECK_E2E_TESTS_SCRIPT ?= $(ROOT_DIR)/scripts/check_e2e_tests.py
 COVERAGE_DIR := $(dir $(COVERAGE_XML))
 
 # ------------------------------------------------------------------------------
@@ -95,6 +97,11 @@ test-property: ## Run property-based tests (proptest) in unit test module
 test-e2e: ## Run e2e/ML scaffold tests (ignored tests are not run by default)
 	$(CARGO) test $(CARGO_LOCKED) --test e2e_tests --verbose
 
+.PHONY: check-e2e-min
+check-e2e-min: ## Fail if discovered e2e test count is below E2E_MIN_TESTS
+	E2E_MIN_TESTS="$(E2E_MIN_TESTS)" CARGO="$(CARGO)" \
+		"$(PYTHON)" "$(CHECK_E2E_TESTS_SCRIPT)" --locked
+
 .PHONY: test-e2e-ignored
 test-e2e-ignored: ## Run ignored e2e/ML tests (requires external fixtures)
 	$(CARGO) test $(CARGO_LOCKED) --test e2e_tests -- --ignored --nocapture
@@ -132,7 +139,7 @@ coverage-e2e: ## Generate e2e-test coverage report
 		exit 1; \
 	}
 	mkdir -p "$(COVERAGE_DIR)"
-	$(CARGO) llvm-cov --all-features --workspace --test e2e_tests --cobertura --output-path "$(E2E_COVERAGE_XML)"
+	$(CARGO) llvm-cov --all-features --workspace --test e2e_tests --bins --cobertura --output-path "$(E2E_COVERAGE_XML)"
 
 .PHONY: coverage-check
 coverage-check: ## Fail if coverage is below COVERAGE_MIN

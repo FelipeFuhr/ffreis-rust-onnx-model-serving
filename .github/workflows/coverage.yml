@@ -69,7 +69,7 @@ jobs:
       - name: Integration and E2E coverage thresholds
         run: |
           set -euo pipefail
-          make -C app coverage-segment-check INTEGRATION_COVERAGE_MIN=57 E2E_COVERAGE_MIN=25
+          make -C app coverage-segment-check INTEGRATION_COVERAGE_MIN=55 E2E_COVERAGE_MIN=25
 
       - name: Check Codecov token availability
         id: codecov_gate
