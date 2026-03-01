@@ -41,14 +41,13 @@ jobs:
           set -euo pipefail
           CONTAINER_COMMAND=podman make build
       - name: Install Trivy
+        uses: aquasecurity/setup-trivy@v0.2.2
+        with:
+          version: v0.67.2
+
+      - name: Verify Trivy installation
         run: |
           set -euo pipefail
-          TRIVY_VERSION="v0.67.2"
-          curl -sfL \
-            --proto '=https' \
-            --proto-redir '=https' \
-            "https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh" \
-            | sudo sh -s -- -b /usr/local/bin "${TRIVY_VERSION}"
           trivy --version
       - name: Scan images (parallel, Podman)
         run: |
