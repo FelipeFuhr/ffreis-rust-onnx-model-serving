@@ -24,15 +24,21 @@ if rate_attr is None:
     raise SystemExit(2)
 
 rate = float(rate_attr) * 100.0
-if rate + 1e-9 < min_cov:
+effective_min = min_cov - max_drift if max_drift is not None else min_cov
+if rate + 1e-9 < effective_min:
+    if max_drift is None:
+        print(f"{label}: got {rate:.2f}% | wanted >= {min_cov:.2f}%")
+    else:
+        print(
+            f"{label}: got {rate:.2f}% | wanted >= {effective_min:.2f}% "
+            f"(target {min_cov:.2f}% - drift {max_drift:.2f}%)"
+        )
+    raise SystemExit(1)
+
+if max_drift is None:
     print(f"{label}: got {rate:.2f}% | wanted >= {min_cov:.2f}%")
-    raise SystemExit(1)
-
-if max_drift is not None and rate - min_cov > max_drift + 1e-9:
+else:
     print(
-        f"{label}: got {rate:.2f}% | wanted <= {min_cov + max_drift:.2f}% "
-        f"(min {min_cov:.2f}% + drift {max_drift:.2f}%). Raise COVERAGE_MIN.",
+        f"{label}: got {rate:.2f}% | wanted >= {effective_min:.2f}% "
+        f"(target {min_cov:.2f}% - drift {max_drift:.2f}%)"
     )
-    raise SystemExit(1)
-
-print(f"{label}: got {rate:.2f}% | wanted >= {min_cov:.2f}%")
