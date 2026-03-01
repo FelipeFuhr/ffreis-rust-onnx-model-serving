@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
 OPENAPI_FILE = "docs/openapi.yaml"
 API_CONTRACT_SOURCES = (
     "app/src/lib.rs",
@@ -60,7 +61,7 @@ def main() -> int:
         )
         return 1
 
-    spec_exists = Path(OPENAPI_FILE).exists()
+    spec_exists = (REPO_ROOT / OPENAPI_FILE).exists()
     if not spec_exists:
         print(f"Required OpenAPI file not found: {OPENAPI_FILE}", file=sys.stderr)
         return 1

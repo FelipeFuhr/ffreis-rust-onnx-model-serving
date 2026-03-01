@@ -104,10 +104,21 @@ fn binary_starts_http_service_and_answers_healthz() {
     let port = free_port();
     let mut child = spawn_http_binary(exe, port, None, None);
 
-    thread::sleep(Duration::from_millis(250));
     let url = format!("http://127.0.0.1:{port}/healthz");
-    let response = reqwest::blocking::get(url).expect("healthz request");
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let mut response = None;
+    for _ in 0..100 {
+        match reqwest::blocking::get(&url) {
+            Ok(r) if r.status() == reqwest::StatusCode::OK => {
+                response = Some(r);
+                break;
+            }
+            _ => thread::sleep(Duration::from_millis(50)),
+        }
+    }
+    assert_eq!(
+        response.expect("healthz did not succeed in time").status(),
+        reqwest::StatusCode::OK
+    );
 
     stop_child_gracefully(&mut child);
 }
