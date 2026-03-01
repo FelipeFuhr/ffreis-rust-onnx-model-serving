@@ -8,10 +8,11 @@ SHELL := /usr/bin/env bash
 
 CARGO ?= cargo
 PYTHON ?= python3
-COVERAGE_PYTHON ?= uv run --with defusedxml python
+COVERAGE_PYTHON ?= $(if $(shell command -v uv 2>/dev/null),uv run --with defusedxml python,$(PYTHON))
 CARGO_LOCKED ?= --locked
 
 COVERAGE_MIN ?= 90
+COVERAGE_OVERALL_MAX_DRIFT ?= 1
 COVERAGE_PER_FILE_MIN ?= 90
 COVERAGE_FILES ?= app/src/main.rs,app/src/lib.rs,app/src/config.rs,app/src/telemetry.rs
 INTEGRATION_COVERAGE_MIN ?= 57
@@ -149,7 +150,7 @@ coverage-check: ## Fail if coverage is below COVERAGE_MIN
 		exit 1; \
 	}
 	$(MAKE) coverage
-	COVERAGE_LABEL="overall" COVERAGE_MIN="$(COVERAGE_MIN)" COVERAGE_XML="$(COVERAGE_XML)" \
+	COVERAGE_LABEL="overall" COVERAGE_MIN="$(COVERAGE_MIN)" COVERAGE_MAX_DRIFT="$(COVERAGE_OVERALL_MAX_DRIFT)" COVERAGE_XML="$(COVERAGE_XML)" \
 		$(COVERAGE_PYTHON) "$(CHECK_COVERAGE_SCRIPT)"
 	COVERAGE_PER_FILE_MIN="$(COVERAGE_PER_FILE_MIN)" COVERAGE_FILES="$(COVERAGE_FILES)" \
 		COVERAGE_XML="$(COVERAGE_XML)" $(COVERAGE_PYTHON) "$(CHECK_COVERAGE_PER_FILE_SCRIPT)"
