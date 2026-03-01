@@ -41,6 +41,7 @@ const JSON_LINES_CONTENT_TYPES: &[&str] = &[
 const CSV_CONTENT_TYPES: &[&str] = &["text/csv", "application/csv"];
 const SAGEMAKER_CONTENT_TYPE_HEADER: &str = "x-amzn-sagemaker-content-type";
 const SAGEMAKER_ACCEPT_HEADER: &str = "x-amzn-sagemaker-accept";
+const OPENAPI_SPEC_PATH_ENV_KEY: &str = "OPENAPI_SPEC_PATH";
 const SWAGGER_UI_HTML: &str = r##"<!doctype html>
 <html>
 <head>
@@ -890,7 +891,7 @@ async fn http_invocations(
 }
 
 fn load_openapi_yaml() -> Option<String> {
-    if let Ok(path) = std::env::var("OPENAPI_SPEC_PATH") {
+    if let Ok(path) = std::env::var(OPENAPI_SPEC_PATH_ENV_KEY) {
         let trimmed = path.trim();
         if !trimmed.is_empty() {
             return fs::read_to_string(trimmed).ok();

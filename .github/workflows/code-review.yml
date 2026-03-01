@@ -116,7 +116,7 @@ jobs:
       - name: Integration and E2E coverage thresholds
         run: |
           set -euo pipefail
-          make -C app coverage-segment-check
+          make -C app coverage-segment-check INTEGRATION_COVERAGE_MIN=20 E2E_COVERAGE_MIN=20
 
       - name: Coverage threshold
         run: |

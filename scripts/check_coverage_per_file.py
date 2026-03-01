@@ -1,9 +1,6 @@
 import os
 import sys
-try:
-    from defusedxml import ElementTree as ET
-except ImportError:  # pragma: no cover - optional hardening dependency
-    from xml.etree import ElementTree as ET
+from defusedxml import ElementTree as ET
 
 
 def _normalize(path: str) -> str:
