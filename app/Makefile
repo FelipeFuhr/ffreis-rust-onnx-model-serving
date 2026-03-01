@@ -8,6 +8,7 @@ SHELL := /usr/bin/env bash
 
 CARGO ?= cargo
 PYTHON ?= python3
+COVERAGE_PYTHON ?= uv run --with defusedxml python
 CARGO_LOCKED ?= --locked
 
 COVERAGE_MIN ?= 90
@@ -149,9 +150,9 @@ coverage-check: ## Fail if coverage is below COVERAGE_MIN
 	}
 	$(MAKE) coverage
 	COVERAGE_MIN="$(COVERAGE_MIN)" COVERAGE_XML="$(COVERAGE_XML)" \
-		"$(PYTHON)" "$(CHECK_COVERAGE_SCRIPT)"
+		$(COVERAGE_PYTHON) "$(CHECK_COVERAGE_SCRIPT)"
 	COVERAGE_PER_FILE_MIN="$(COVERAGE_PER_FILE_MIN)" COVERAGE_FILES="$(COVERAGE_FILES)" \
-		COVERAGE_XML="$(COVERAGE_XML)" "$(PYTHON)" "$(CHECK_COVERAGE_PER_FILE_SCRIPT)"
+		COVERAGE_XML="$(COVERAGE_XML)" $(COVERAGE_PYTHON) "$(CHECK_COVERAGE_PER_FILE_SCRIPT)"
 
 .PHONY: coverage-segment-check
 coverage-segment-check: ## Fail if integration/e2e coverage is below thresholds
@@ -162,8 +163,8 @@ coverage-segment-check: ## Fail if integration/e2e coverage is below thresholds
 	$(MAKE) coverage-integration
 	COVERAGE_MIN="$(INTEGRATION_COVERAGE_MIN)" COVERAGE_MAX_DRIFT="$(COVERAGE_SEGMENT_MAX_DRIFT)" \
 		COVERAGE_XML="$(INTEGRATION_COVERAGE_XML)" \
-		"$(PYTHON)" "$(CHECK_COVERAGE_SCRIPT)"
+		$(COVERAGE_PYTHON) "$(CHECK_COVERAGE_SCRIPT)"
 	$(MAKE) coverage-e2e
 	COVERAGE_MIN="$(E2E_COVERAGE_MIN)" COVERAGE_MAX_DRIFT="$(COVERAGE_SEGMENT_MAX_DRIFT)" \
 		COVERAGE_XML="$(E2E_COVERAGE_XML)" \
-		"$(PYTHON)" "$(CHECK_COVERAGE_SCRIPT)"
+		$(COVERAGE_PYTHON) "$(CHECK_COVERAGE_SCRIPT)"
