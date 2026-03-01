@@ -75,12 +75,21 @@ fn spawn_grpc_binary(exe: &str, port: u16, model_dir: &std::path::Path) -> Child
 }
 
 fn post_json_invocations(port: u16, body: Vec<u8>) -> reqwest::blocking::Response {
+    post_invocations(port, body, "application/json", "application/json")
+}
+
+fn post_invocations(
+    port: u16,
+    body: Vec<u8>,
+    content_type: &str,
+    accept: &str,
+) -> reqwest::blocking::Response {
     let client = reqwest::blocking::Client::new();
     let url = format!("http://127.0.0.1:{port}/invocations");
     client
         .post(url)
-        .header("content-type", "application/json")
-        .header("accept", "application/json")
+        .header("content-type", content_type)
+        .header("accept", accept)
         .body(body)
         .send()
         .expect("invocations request")
@@ -139,6 +148,67 @@ fn binary_handles_grpc_predict_happy_path() {
     );
     let payload: serde_json::Value = serde_json::from_slice(&reply.body).expect("json body");
     assert!(payload.is_array(), "prediction body should be a JSON array");
+
+    stop_child_gracefully(&mut child);
+}
+
+#[test]
+fn binary_returns_400_for_invalid_json_payload() {
+    let Some(exe) = option_env!("CARGO_BIN_EXE_app") else {
+        return;
+    };
+    let model_dir = make_temp_model_dir();
+    let port = free_port();
+    let mut child = spawn_http_binary(exe, port, Some(model_dir.path()), None);
+
+    thread::sleep(Duration::from_millis(350));
+    let response = post_json_invocations(port, b"{not-json".to_vec());
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+
+    stop_child_gracefully(&mut child);
+}
+
+#[test]
+fn binary_supports_csv_response_format() {
+    let Some(exe) = option_env!("CARGO_BIN_EXE_app") else {
+        return;
+    };
+    let model_dir = make_temp_model_dir();
+    let port = free_port();
+    let mut child = spawn_http_binary(exe, port, Some(model_dir.path()), None);
+
+    thread::sleep(Duration::from_millis(350));
+    let response = post_invocations(port, b"1,2\n3,4\n".to_vec(), "text/csv", "text/csv");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok()),
+        Some("text/csv")
+    );
+    let body = response.text().expect("csv body");
+    assert!(body.contains('\n') || !body.is_empty());
+
+    stop_child_gracefully(&mut child);
+}
+
+#[test]
+fn binary_ready_returns_500_when_model_missing() {
+    let Some(exe) = option_env!("CARGO_BIN_EXE_app") else {
+        return;
+    };
+    let empty_model_dir = tempfile::tempdir().expect("temp dir");
+    let port = free_port();
+    let mut child = spawn_http_binary(exe, port, Some(empty_model_dir.path()), None);
+
+    thread::sleep(Duration::from_millis(350));
+    let url = format!("http://127.0.0.1:{port}/ready");
+    let response = reqwest::blocking::get(url).expect("ready request");
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::INTERNAL_SERVER_ERROR
+    );
 
     stop_child_gracefully(&mut child);
 }
