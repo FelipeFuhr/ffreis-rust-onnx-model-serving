@@ -8,3 +8,8 @@ updates:
     directory: "/app"
     schedule:
       interval: "weekly"
+
+  - package-ecosystem: docker
+    directory: /container
+    schedule:
+      interval: daily
