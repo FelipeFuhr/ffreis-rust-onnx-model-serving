@@ -283,3 +283,14 @@ clean-runner: ## Remove runner image
 
 .PHONY: clean-all
 clean-all: clean-repo clean-base clean-base-builder clean-builder clean-base-runner clean-runner ## Clean everything
+
+# ------------------------------------------------------------------------------
+# Security
+# ------------------------------------------------------------------------------
+
+GITLEAKS ?= gitleaks
+
+.PHONY: secrets-scan-staged
+secrets-scan-staged: ## Scan staged diff for secrets
+	@command -v $(GITLEAKS) >/dev/null 2>&1 || (echo "Missing tool: $(GITLEAKS). Install: https://github.com/gitleaks/gitleaks#installing" && exit 1)
+	$(GITLEAKS) protect --staged --redact

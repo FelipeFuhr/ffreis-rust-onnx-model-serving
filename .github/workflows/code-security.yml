@@ -1,23 +1,21 @@
-name: Code Security (Cargo Audit)
+name: Security (cargo-audit)
 
 on:
   workflow_dispatch:
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths:
       - "app/**"
-      - "Makefile"
       - "rust-toolchain.toml"
       - ".github/workflows/code-security.yml"
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - "app/**"
-      - "Makefile"
       - "rust-toolchain.toml"
       - ".github/workflows/code-security.yml"
   schedule:
-    - cron: "0 9 * * 1" # Mondays 09:00 UTC
+    - cron: "0 9 * * 1"
 
 permissions:
   contents: read
@@ -27,50 +25,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deps-security:
-    runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        shell: bash
-        working-directory: app
-
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
-        with:
-          egress-policy: audit
-
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-
-      - name: Assert Rust workspace exists
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ ! -f Cargo.toml ]; then
-            echo "Expected Rust workspace in ./app, but ./app/Cargo.toml was not found."
-            echo "Repo root contents:"
-            ls -la ..
-            echo "app/ contents (if any):"
-            ls -la . || true
-            exit 1
-          fi
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
-        with:
-          toolchain: stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
-        with:
-          workspaces: |
-            app -> target
-
-      - name: cargo-audit
-        run: |
-          set -euo pipefail
-          cargo install cargo-audit --locked
-          cargo audit --ignore RUSTSEC-2026-0009
+  cargo-audit:
+    uses: FelipeFuhr/ffreis-workflows-rust/.github/workflows/rust-security.yml@f3f3acf975d34494fb6d54ad107195a8808bc722
+    with:
+      working-directory: "app"
+      ignore-advisories: "RUSTSEC-2026-0009"

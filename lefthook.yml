@@ -1,26 +1,14 @@
-pre-commit:
-  parallel: true
-  commands:
-    rustfmt:
-      glob: "app/**/*.rs"
-      run: make -C app fmt
-
-    lint:
-      glob: "app/**/*.rs"
-      run: make -C app lint
-
-    hygiene:
-      run: |
-        if grep -R --line-number --binary-files=without-match \
-          --exclude-dir=.git --exclude-dir=target --exclude-dir=build --exclude-dir=coverage \
-          --exclude=lefthook.yml \
-          -E '^(<<<<<<<|=======|>>>>>>>)' .; then
-          echo "Merge conflict markers found"
-          exit 1
-        fi
+remotes:
+  - git_url: https://github.com/FelipeFuhr/ffreis-platform-standards
+    ref: 1b2afe64334b4aff11c7e3ebc5fa964041efa3b3
+    configs:
+      - lefthook/base.yml
+      - lefthook/rust.yml
 
 pre-push:
   parallel: false
   commands:
-    quality-gates:
-      run: make -C app prepush-check INTEGRATION_COVERAGE_MIN=57 E2E_COVERAGE_MIN=45 E2E_MIN_TESTS=3
+    lint:
+      run: make lint
+    test:
+      run: make test
