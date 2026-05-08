@@ -24,6 +24,7 @@ concurrency:
 
 jobs:
   matrix-build:
+    timeout-minutes: 30
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -52,6 +53,8 @@ jobs:
           make -C app build
 
   unit-tests:
+    timeout-minutes: 30
+    if: ${{ !github.event.pull_request.draft }}
     needs: matrix-build
     runs-on: ubuntu-latest
     steps:
@@ -76,6 +79,8 @@ jobs:
           make -C app test-unit
 
   integration-tests:
+    timeout-minutes: 30
+    if: ${{ !github.event.pull_request.draft }}
     needs: matrix-build
     runs-on: ubuntu-latest
     steps:
@@ -102,6 +107,8 @@ jobs:
           make -C app test-integration
 
   e2e-smoke:
+    timeout-minutes: 30
+    if: ${{ !github.event.pull_request.draft }}
     needs: matrix-build
     runs-on: ubuntu-latest
     steps:
@@ -130,6 +137,7 @@ jobs:
           make -C app check-e2e-min E2E_MIN_TESTS=3
 
   container-smoke:
+    timeout-minutes: 30
     needs: matrix-build
     runs-on: ubuntu-latest
     steps:
@@ -150,6 +158,7 @@ jobs:
           make build
 
   pr-summary:
+    timeout-minutes: 30
     name: PR Summary
     if: always()
     needs: [matrix-build, unit-tests, integration-tests, e2e-smoke, container-smoke]

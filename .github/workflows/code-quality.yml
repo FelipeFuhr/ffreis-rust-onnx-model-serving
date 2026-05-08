@@ -21,6 +21,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   sonarqube:
+    timeout-minutes: 30
     name: SonarQube
     runs-on: ubuntu-latest
     steps:

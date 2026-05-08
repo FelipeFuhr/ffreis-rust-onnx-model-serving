@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   codeql:
+    timeout-minutes: 30
     uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-codeql.yml@01e2b12e992621fecf074b8a202f66044196f3bf
     with:
       languages: "python,ruby"

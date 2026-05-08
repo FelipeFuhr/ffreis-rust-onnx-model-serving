@@ -27,6 +27,8 @@ concurrency:
 
 jobs:
   lint-test:
+    timeout-minutes: 30
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     defaults:
       run:
