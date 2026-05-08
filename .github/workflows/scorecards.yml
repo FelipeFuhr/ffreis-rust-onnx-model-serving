@@ -13,6 +13,10 @@ permissions:
   security-events: write
   id-token: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   scorecard:
     uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-scorecard.yml@01e2b12e992621fecf074b8a202f66044196f3bf
