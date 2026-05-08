@@ -17,5 +17,4 @@ concurrency:
 
 jobs:
   semgrep:
-    timeout-minutes: 30
     uses: FelipeFuhr/ffreis-workflows-rust/.github/workflows/rust-semgrep.yml@main
