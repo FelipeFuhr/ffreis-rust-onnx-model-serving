@@ -9,7 +9,7 @@ on:
       - "Makefile"
       - ".github/workflows/code-quality.yml"
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "app/**"
       - "sonar-project.properties"
@@ -21,6 +21,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   sonarqube:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     name: SonarQube
     runs-on: ubuntu-latest
     timeout-minutes: 30
