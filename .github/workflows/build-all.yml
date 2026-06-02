@@ -2,6 +2,7 @@ name: Build All
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [ main ]
     paths:
       - "app/**"
@@ -24,6 +25,7 @@ concurrency:
 
 jobs:
   matrix-build:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -54,6 +56,7 @@ jobs:
           make -C app build
 
   unit-tests:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     needs: matrix-build
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -81,6 +84,7 @@ jobs:
           make -C app test-unit
 
   integration-tests:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     needs: matrix-build
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -110,6 +114,7 @@ jobs:
           make -C app test-integration
 
   e2e-smoke:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     needs: matrix-build
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -141,6 +146,7 @@ jobs:
           make -C app check-e2e-min E2E_MIN_TESTS=3
 
   container-smoke:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     needs: matrix-build
     runs-on: ubuntu-latest
     timeout-minutes: 30
