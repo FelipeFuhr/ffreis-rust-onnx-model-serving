@@ -1,5 +1,7 @@
 name: Container Vulnerability Scan (Grype)
 
+permissions: {}
+
 on:
   workflow_dispatch:
   push:
@@ -140,11 +142,14 @@ jobs:
 
             gh api \
               -X POST \
-              /repos/${{ github.repository }}/code-scanning/sarifs \
+              "/repos/${GH_REPO}/code-scanning/sarifs" \
               -f sarif="${sarif_payload}" \
               -f tool_name="grype-${name}" \
-              -f commit_sha="${{ github.sha }}" \
-              -f ref="${{ github.ref }}"
+              -f commit_sha="${GH_SHA}" \
+              -f ref="${GH_REF}"
           done
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+          GH_REF: ${{ github.ref }}

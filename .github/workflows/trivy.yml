@@ -1,4 +1,7 @@
 name: Container Vulnerability Scan (Trivy)
+
+permissions: {}
+
 on:
   workflow_dispatch:
   pull_request:
@@ -168,14 +171,17 @@ jobs:
             sarif_payload="$(gzip -c "$f" | base64 | tr -d '\n')"
             gh api \
               -X POST \
-              /repos/${{ github.repository }}/code-scanning/sarifs \
+              "/repos/${GH_REPO}/code-scanning/sarifs" \
               -f sarif="${sarif_payload}" \
               -f tool_name="trivy-${name}" \
-              -f commit_sha="${{ github.sha }}" \
-              -f ref="${{ github.ref }}"
+              -f commit_sha="${GH_SHA}" \
+              -f ref="${GH_REF}"
           done
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+          GH_REF: ${{ github.ref }}
       - name: Check gate results
         if: always() && hashFiles('trivy-results/*.gate-status') != ''
         run: |
