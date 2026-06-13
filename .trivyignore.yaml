@@ -14,4 +14,4 @@ vulnerabilities:
       Fixed in 3.5.5-1ubuntu3.2. Suppressed until ubuntu:resolute base image digest
       is updated to a build that includes the OpenSSL 3.5.5 package. Track in a
       separate chore/update-base-image-digest PR.
-    expired_at: "2026-09-30"
+    expired_at: "2026-09-30T00:00:00Z"
