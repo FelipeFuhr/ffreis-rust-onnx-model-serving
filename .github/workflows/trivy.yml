@@ -65,13 +65,16 @@ jobs:
         run: |
           set -euo pipefail
           trivy --version
-      - name: Scan images (parallel, Podman)
+      - name: Scan images (sequential, Podman)
         run: |
           set -euo pipefail
           mkdir -p trivy-results
           images=(ffreis/base ffreis/base-builder ffreis/builder ffreis/base-runner ffreis/runner)
 
-          # Warm DB once to avoid duplicate updates and lock contention in parallel scans.
+          # Download DB once. Scans run sequentially to avoid Trivy cache/DB lock
+          # contention: parallel trivy processes share the same ~/.cache/trivy FS
+          # lock and time out against each other when more than one process runs
+          # concurrently on the same runner (Trivy issue: database-and-cache-lock-errors).
           trivy image --download-db-only --no-progress
 
           scan_image() {
@@ -143,14 +146,8 @@ jobs:
             fi
           }
 
-          pids=()
           for image in "${images[@]}"; do
-            scan_image "$image" &
-            pids+=("$!")
-          done
-
-          for pid in "${pids[@]}"; do
-            wait "$pid"
+            scan_image "$image"
           done
       - name: Upload Trivy JSON reports
         if: always() && hashFiles('trivy-results/*.json') != ''

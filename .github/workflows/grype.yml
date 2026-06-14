@@ -86,12 +86,39 @@ jobs:
             name="${image##*/}"
             out="grype-results/${name}.sarif"
 
-            ./bin/grype "podman:${image}" -o sarif --file "$out" --fail-on high
+            # Capture exit code: grype returns 2 when HIGH/CRITICAL found (--fail-on high).
+            # Write gate-status so the upload step still runs even with findings.
+            if ./bin/grype "podman:${image}" -o sarif --file "$out" --fail-on high; then
+              echo "PASS" > "grype-results/${name}.gate-status"
+            else
+              exit_code=$?
+              if [ "$exit_code" -eq 2 ]; then
+                echo "FAIL" > "grype-results/${name}.gate-status"
+              else
+                echo "::error::Grype scan for ${image} failed (exit ${exit_code})" >&2
+                exit "$exit_code"
+              fi
+            fi
 
             test -s "$out"
           done
+
+          # Gate: fail if any image has HIGH/CRITICAL vulnerabilities.
+          shopt -s nullglob
+          failed=0
+          for f in grype-results/*.gate-status; do
+            img="$(basename "$f" .gate-status)"
+            status="$(cat "$f")"
+            if [ "$status" = "FAIL" ]; then
+              echo "::error::Image ${img} failed HIGH/CRITICAL vulnerability gate"
+              failed=1
+            else
+              echo "Image ${img} passed HIGH/CRITICAL vulnerability gate"
+            fi
+          done
+          exit "$failed"
       - name: Upload Grype SARIF (per image)
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
+        if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) && hashFiles('grype-results/*.sarif') != '' }}
         run: |
           set -euo pipefail
           for f in grype-results/*.sarif; do
