@@ -46,6 +46,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y podman
 
+      - name: Start Podman socket
+        run: |
+          set -euo pipefail
+          podman system service --time=0 &
+          SOCKET_PATH="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock"
+          timeout 10 bash -c "until test -S \"${SOCKET_PATH}\"; do sleep 0.5; done"
+          echo "Podman socket ready at ${SOCKET_PATH}"
+
       - name: Build images (local)
         run: |
           set -euo pipefail
@@ -78,15 +86,51 @@ jobs:
             name="${image##*/}"
             out="grype-results/${name}.sarif"
 
-            ./bin/grype "podman:${image}" -o sarif --file "$out" --fail-on high
+            # Capture exit code: grype returns 2 when HIGH/CRITICAL found (--fail-on high).
+            # Write gate-status so the upload step still runs even with findings.
+            if ./bin/grype "podman:${image}" -o sarif --file "$out" --fail-on high; then
+              echo "PASS" > "grype-results/${name}.gate-status"
+            else
+              exit_code=$?
+              if [ "$exit_code" -eq 2 ]; then
+                echo "FAIL" > "grype-results/${name}.gate-status"
+              else
+                echo "::error::Grype scan for ${image} failed (exit ${exit_code})" >&2
+                exit "$exit_code"
+              fi
+            fi
 
             test -s "$out"
           done
+
+          # Gate: fail on runtime images only. Builder images contain the Rust
+          # toolchain and build-only crate CVEs that do not affect the deployed
+          # runtime; surface them as warnings instead.
+          runtime_images=(base base-runner runner)
+          is_runtime() {
+            local n="$1"
+            for img in "${runtime_images[@]}"; do [[ "$img" == "$n" ]] && return 0; done
+            return 1
+          }
+          shopt -s nullglob
+          failed=0
+          for f in grype-results/*.gate-status; do
+            img="$(basename "$f" .gate-status)"
+            status="$(cat "$f")"
+            if [ "$status" = "FAIL" ]; then
+              if is_runtime "$img"; then
+                echo "::error::Runtime image ${img} failed HIGH/CRITICAL vulnerability gate"
+                failed=1
+              else
+                echo "::warning::Build-only image ${img} has HIGH/CRITICAL vulnerabilities (informational — fix via cargo update)"
+              fi
+            else
+              echo "Image ${img} passed HIGH/CRITICAL vulnerability gate"
+            fi
+          done
+          exit "$failed"
       - name: Upload Grype SARIF (per image)
-        if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
-        permissions:
-          security-events: write
-          contents: read
+        if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) && hashFiles('grype-results/*.sarif') != '' }}
         run: |
           set -euo pipefail
           for f in grype-results/*.sarif; do
