@@ -9,9 +9,13 @@ RUN cargo build --release --locked
 FROM docker.io/library/debian:bookworm-slim
 
 RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/target/release/app /usr/local/bin/app
+
+RUN groupadd --gid 1000 appuser && useradd --uid 1000 --gid appuser --no-create-home --shell /sbin/nologin appuser
+USER appuser
 
 ENTRYPOINT ["/usr/local/bin/app"]
