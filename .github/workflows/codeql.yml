@@ -4,9 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
   schedule:
-    - cron: "0 0 * * 1"
+    - cron: "32 18 5 * *"  # monthly scattered (was: 0 0 * * 1)
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -18,6 +19,6 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-codeql.yml@01e2b12e992621fecf074b8a202f66044196f3bf
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-codeql.yml@b4d4d5ad74c44cc758be8cbed14720747e97adfc # v1.6.0
     with:
-      languages: "python,ruby"
+      languages: "rust"

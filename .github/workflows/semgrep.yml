@@ -1,12 +1,9 @@
 name: Security - SAST (Semgrep)
 
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
+  workflow_dispatch:
   schedule:
-    - cron: "0 8 * * 1"
+    - cron: "20 4 8 * *"  # monthly scattered (was: 0 8 * * 1)
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

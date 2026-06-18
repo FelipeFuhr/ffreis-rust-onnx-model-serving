@@ -1,5 +1,9 @@
 # ffreis-rust-onnx-model-serving
 
+<!-- ffreis-badges:start -->
+[![CI](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/FelipeFuhr/ffreis-badges/main/badges/ffreis-rust-onnx-model-serving/ci.json)](https://github.com/FelipeFuhr/ffreis-rust-onnx-model-serving/actions) [![Latest version](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/FelipeFuhr/ffreis-badges/main/badges/ffreis-rust-onnx-model-serving/version.json)](https://github.com/FelipeFuhr/ffreis-rust-onnx-model-serving/releases) [![License](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/FelipeFuhr/ffreis-badges/main/badges/ffreis-rust-onnx-model-serving/license.json)](https://github.com/FelipeFuhr/ffreis-rust-onnx-model-serving/blob/main/LICENSE)
+<!-- ffreis-badges:end -->
+
 Rust implementation of the same serving contract used in `ffreis-python-onnx-model-serving`.
 
 ## HTTP surface

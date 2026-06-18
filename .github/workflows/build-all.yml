@@ -1,7 +1,14 @@
 name: Build All
 
 on:
+  workflow_dispatch:
+    inputs:
+      build_macos:
+        description: "Also build on macOS (10x Actions billing — manual cross-platform check only)"
+        type: boolean
+        default: false
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [ main ]
     paths:
       - "app/**"
@@ -24,14 +31,24 @@ concurrency:
 
 jobs:
   matrix-build:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        rust: [1.88.0, stable]
-        os: [ubuntu-latest, macos-latest]
+      # PR builds the primary version only (cost). Full version matrix runs on
+      # push/schedule and on manual workflow_dispatch (pair with build_macos=true
+      # for the full cross-platform x cross-version compatibility proof).
+        rust: ${{ fromJson( github.event_name == 'pull_request' && '["stable"]' || '["1.88.0","stable"]' ) }}
+      # COST GUARD: macOS Actions minutes bill 10x and every artifact here is
+      # Linux-only (arm64 Lambdas / Linux containers), so macOS is OFF in the
+      # normal push/PR/schedule flow. It runs ONLY via manual workflow_dispatch
+      # with build_macos=true. Do NOT hardcode "macos-latest" back here — that
+      # silently restores the 10x drain on every run (CI cost incident 2026-06).
+        os: ${{ fromJson( (github.event_name == 'workflow_dispatch' && inputs.build_macos) && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]' ) }}
+
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
@@ -54,8 +71,10 @@ jobs:
           make -C app build
 
   unit-tests:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     needs: matrix-build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -80,8 +99,10 @@ jobs:
           make -C app test-unit
 
   integration-tests:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     needs: matrix-build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -108,8 +129,10 @@ jobs:
           make -C app test-integration
 
   e2e-smoke:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     needs: matrix-build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -138,8 +161,10 @@ jobs:
           make -C app check-e2e-min E2E_MIN_TESTS=3
 
   container-smoke:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     needs: matrix-build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -164,6 +189,7 @@ jobs:
     if: always()
     needs: [matrix-build, unit-tests, integration-tests, e2e-smoke, container-smoke]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions: {}
     steps:
       - name: Harden the runner (Audit all outbound calls)

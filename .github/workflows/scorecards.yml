@@ -3,9 +3,14 @@ name: Scorecard supply-chain security
 on:
   branch_protection_rule:
   schedule:
-    - cron: "20 7 * * 2"
+    - cron: "47 0 8 * *"  # monthly scattered (was: 20 7 * * 2)
   push:
     branches: [main]
+
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   scorecard:
@@ -14,7 +19,6 @@ jobs:
       actions: read
       security-events: write
       id-token: write
-    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-scorecard.yml@01e2b12e992621fecf074b8a202f66044196f3bf
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-scorecard-publish.yml@610fd288c303c9dfe06ea7fa153f5d0178224342 # v1.3.2
     with:
       upload-sarif: true
-      publish-results: true

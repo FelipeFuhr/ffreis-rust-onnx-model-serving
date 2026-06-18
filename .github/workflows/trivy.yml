@@ -1,7 +1,11 @@
 name: Container Vulnerability Scan (Trivy)
+
+permissions: {}
+
 on:
   workflow_dispatch:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [ main ]
     paths:
       - "app/**"
@@ -24,6 +28,7 @@ concurrency:
 
 jobs:
   image-scan:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -31,55 +36,40 @@ jobs:
       security-events: write
       actions: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Install Podman
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y podman
+      - name: Start Podman socket
+        run: |
+          set -euo pipefail
+          podman system service --time=0 &
+          SOCKET_PATH="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/podman/podman.sock"
+          timeout 10 bash -c "until test -S \"${SOCKET_PATH}\"; do sleep 0.5; done"
+          echo "Podman socket ready at ${SOCKET_PATH}"
       - name: Build images
         run: |
           set -euo pipefail
           CONTAINER_COMMAND=podman make build
+      - name: Start Podman socket
+        run: |
+          set -euo pipefail
+          systemctl --user start podman.socket
+          PODMAN_SOCK="${XDG_RUNTIME_DIR}/podman/podman.sock"
+          end=$((SECONDS + 30))
+          while [ "$SECONDS" -lt "$end" ]; do
+            [ -S "$PODMAN_SOCK" ] && break
+            sleep 0.5
+          done
+          [ -S "$PODMAN_SOCK" ] || { echo "Podman socket did not start within 30s"; exit 1; }
+          echo "Podman socket ready at $PODMAN_SOCK"
       - name: Install Trivy
         run: |
           set -euo pipefail
           TRIVY_VERSION="${TRIVY_VERSION:-v0.67.2}"
-          TRIVY_URL="$(
-            python3 - "${TRIVY_VERSION}" <<'PY'
-import json
-import sys
-import urllib.request
-from urllib.error import HTTPError
-
-requested_tag = sys.argv[1]
-api_base = "https://api.github.com/repos/aquasecurity/trivy/releases"
-
-def fetch(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=30) as resp:
-        return json.load(resp)
-
-def pick_asset_url(release: dict) -> str | None:
-    assets = release.get("assets", [])
-    for asset in assets:
-        name = asset.get("name", "")
-        if name.endswith("_Linux-64bit.tar.gz"):
-            return asset.get("browser_download_url")
-    return None
-
-release = None
-try:
-    release = fetch(f"{api_base}/tags/{requested_tag}")
-except HTTPError:
-    release = fetch(f"{api_base}/latest")
-
-url = pick_asset_url(release)
-if not url:
-    raise SystemExit("Could not find Linux-64bit tarball for Trivy release")
-
-print(url)
-PY
-          )"
+          TRIVY_URL="$(python3 .github/scripts/get_trivy_url.py "${TRIVY_VERSION}")"
           TRIVY_TARBALL="$(basename "${TRIVY_URL}")"
 
           curl -fsSL --proto '=https' --proto-redir '=https' "${TRIVY_URL}" -o "${TRIVY_TARBALL}"
@@ -90,13 +80,16 @@ PY
         run: |
           set -euo pipefail
           trivy --version
-      - name: Scan images (parallel, Podman)
+      - name: Scan images (sequential, Podman)
         run: |
           set -euo pipefail
           mkdir -p trivy-results
           images=(ffreis/base ffreis/base-builder ffreis/builder ffreis/base-runner ffreis/runner)
 
-          # Warm DB once to avoid duplicate updates and lock contention in parallel scans.
+          # Download DB once. Scans run sequentially to avoid Trivy cache/DB lock
+          # contention: parallel trivy processes share the same ~/.cache/trivy FS
+          # lock and time out against each other when more than one process runs
+          # concurrently on the same runner (Trivy issue: database-and-cache-lock-errors).
           trivy image --download-db-only --no-progress
 
           scan_image() {
@@ -104,6 +97,9 @@ PY
             name="${image##*/}"
             # 1) Always produce SARIF for all severities so GitHub code scanning
             # has complete visibility, regardless of pass/fail gate outcome.
+            # --skip-dirs excludes the cargo registry cache (downloaded dep source code
+            # including their own Cargo.lock files) to avoid false positives. The project
+            # build output at build/Cargo.lock is still scanned.
             trivy image \
               --image-src podman \
               --skip-db-update \
@@ -112,6 +108,7 @@ PY
               --scanners vuln \
               --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
               --ignore-unfixed \
+              --skip-dirs home/appuser/.cargo/registry \
               --exit-code 0 \
               --format sarif \
               --output "trivy-results/${name}.sarif" \
@@ -127,6 +124,7 @@ PY
               --scanners vuln \
               --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
               --ignore-unfixed \
+              --skip-dirs home/appuser/.cargo/registry \
               --exit-code 0 \
               --format json \
               --output "trivy-results/${name}.json" \
@@ -143,6 +141,7 @@ PY
               --scanners vuln \
               --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
               --ignore-unfixed \
+              --skip-dirs home/appuser/.cargo/registry \
               --exit-code 0 \
               --format table \
               "$image"
@@ -159,6 +158,7 @@ PY
               --ignorefile .trivyignore.yaml \
               --scanners vuln \
               --severity HIGH,CRITICAL \
+              --skip-dirs home/appuser/.cargo/registry \
               --exit-code 1 \
               --format table \
               "$image"; then
@@ -168,18 +168,12 @@ PY
             fi
           }
 
-          pids=()
           for image in "${images[@]}"; do
-            scan_image "$image" &
-            pids+=("$!")
-          done
-
-          for pid in "${pids[@]}"; do
-            wait "$pid"
+            scan_image "$image"
           done
       - name: Upload Trivy JSON reports
         if: always() && hashFiles('trivy-results/*.json') != ''
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: trivy-json-reports
           path: trivy-results/*.json
@@ -196,14 +190,17 @@ PY
             sarif_payload="$(gzip -c "$f" | base64 | tr -d '\n')"
             gh api \
               -X POST \
-              /repos/${{ github.repository }}/code-scanning/sarifs \
+              "/repos/${GH_REPO}/code-scanning/sarifs" \
               -f sarif="${sarif_payload}" \
               -f tool_name="trivy-${name}" \
-              -f commit_sha="${{ github.sha }}" \
-              -f ref="${{ github.ref }}"
+              -f commit_sha="${GH_SHA}" \
+              -f ref="${GH_REF}"
           done
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+          GH_REF: ${{ github.ref }}
       - name: Check gate results
         if: always() && hashFiles('trivy-results/*.gate-status') != ''
         run: |
@@ -215,12 +212,25 @@ PY
             echo "::error::No gate status files found - scans may not have completed"
             exit 1
           fi
+          # Only gate (fail) on runtime images that are deployed.
+          # Builder images contain the Rust toolchain and build-only crate CVEs
+          # that do not affect the production runtime; they are surfaced as warnings.
+          runtime_images=(base base-runner runner)
+          is_runtime() {
+            local n="$1"
+            for img in "${runtime_images[@]}"; do [[ "$img" == "$n" ]] && return 0; done
+            return 1
+          }
           for f in "${gate_files[@]}"; do
             name="$(basename "$f" .gate-status)"
             status="$(cat "$f")"
             if [ "$status" = "FAIL" ]; then
-              echo "::error::Image ${name} failed HIGH/CRITICAL vulnerability gate"
-              failed=1
+              if is_runtime "$name"; then
+                echo "::error::Runtime image ${name} failed HIGH/CRITICAL vulnerability gate"
+                failed=1
+              else
+                echo "::warning::Build-only image ${name} has HIGH/CRITICAL vulnerabilities (informational — fix via cargo update)"
+              fi
             elif [ "$status" = "PASS" ]; then
               echo "Image ${name} passed HIGH/CRITICAL vulnerability gate"
             else
