@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1](https://github.com/FelipeFuhr/ffreis-rust-onnx-model-serving/compare/v1.0.0...v1.0.1) (2026-06-13)
+
+
+### Bug Fixes
+
+* correct sonar projectKey to ffreis-rust-onnx-model-serving ([#72](https://github.com/FelipeFuhr/ffreis-rust-onnx-model-serving/issues/72)) ([f5a73c4](https://github.com/FelipeFuhr/ffreis-rust-onnx-model-serving/commit/f5a73c4e3917d4b12338c008cf82074ba6807f96))
+* **grype:** bump workflows-general SHA to prevent self-scan CVEs ([#71](https://github.com/FelipeFuhr/ffreis-rust-onnx-model-serving/issues/71)) ([ceebc8b](https://github.com/FelipeFuhr/ffreis-rust-onnx-model-serving/commit/ceebc8b36939b69272f1fcfad15a021ebf17c0ac))
+
 ## 1.0.0 (2026-05-26)
 
 
