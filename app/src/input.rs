@@ -166,10 +166,7 @@ pub(crate) fn load_json_map(raw: &str) -> Result<HashMap<String, String>, String
     let mut out = HashMap::new();
     for (key, val) in object {
         let s = val.as_str().ok_or_else(|| {
-            format!(
-                "Expected string value for key '{}' in JSON object mapping",
-                key
-            )
+            format!("Expected string value for key '{key}' in JSON object mapping")
         })?;
         out.insert(key.clone(), s.to_string());
     }
