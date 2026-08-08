@@ -13,4 +13,4 @@ jobs:
   semgrep:
     permissions:
       contents: read
-    uses: FelipeFuhr/ffreis-workflows-rust/.github/workflows/rust-semgrep.yml@main
+    uses: FelipeFuhr/ffreis-workflows-rust/.github/workflows/rust-semgrep.yml@611209c22f92a16917b4745e3fea018899234be2 # v1.3.0

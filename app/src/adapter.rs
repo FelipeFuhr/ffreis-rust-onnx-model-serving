@@ -202,11 +202,9 @@ pub(crate) fn build_onnx_tensors(
     for (request_key, onnx_input_name) in input_map {
         let mut values = Vec::new();
         for record in records {
+            // scan-fix(clippy:uninlined_format_args): inlined `request_key` into the format string
             let value = record.get(request_key).ok_or_else(|| {
-                format!(
-                    "Missing key '{}' in one of the records for ONNX multi-input",
-                    request_key
-                )
+                format!("Missing key '{request_key}' in one of the records for ONNX multi-input")
             })?;
             values.push(value.clone());
         }

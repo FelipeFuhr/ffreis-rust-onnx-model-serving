@@ -213,6 +213,26 @@ coverage: ## Generate coverage report (Cobertura XML) into ./coverage/
 coverage-check: ## Fail if coverage is below COVERAGE_MIN
 	$(MAKE) -C app coverage-check
 
+# scan-fix(lefthook:naming-mismatch): the fleet's lefthook complex/release tiers
+# (platform/ffreis-platform-standards lefthook/rust.yml) call these exact target
+# names. This repo's equivalent functionality already existed under different
+# names (coverage-check, no security/mutation/release-build targets at all) —
+# add/alias the required names rather than duplicating logic.
+.PHONY: coverage-gate
+coverage-gate: coverage-check ## Alias for coverage-check (name required by the fleet lefthook complex tier)
+
+.PHONY: integration-coverage-gate
+integration-coverage-gate: ## Fail if integration/e2e coverage is below thresholds (fleet lefthook complex tier name)
+	$(MAKE) -C app coverage-segment-check
+
+.PHONY: build-release
+build-release: ## Cargo release build of the app crate (fleet lefthook release tier name)
+	$(MAKE) -C app build-release
+
+.PHONY: mutation
+mutation: ## Scoped mutation testing (fleet lefthook release tier name; matches CI's mutants-args -p app)
+	$(MAKE) -C app mutation
+
 # ------------------------------------------------------------------------------
 # Lefthook
 # ------------------------------------------------------------------------------
@@ -294,3 +314,13 @@ GITLEAKS ?= gitleaks
 secrets-scan-staged: ## Scan staged diff for secrets
 	@command -v $(GITLEAKS) >/dev/null 2>&1 || (echo "Missing tool: $(GITLEAKS). Install: https://github.com/gitleaks/gitleaks#installing" && exit 1)
 	$(GITLEAKS) protect --staged --redact
+
+# scan-fix(lefthook:naming-mismatch): fleet lefthook complex tier
+# (platform/ffreis-platform-standards lefthook/rust.yml) calls `make sec`; this
+# repo had no equivalent local target at all (cargo-audit only ran inside the
+# reusable rust-security.yml CI workflow). Mirrors code-security.yml's
+# ignore-advisories list.
+.PHONY: sec
+sec: ## Run cargo-audit (advisory database) against the app crate
+	@command -v cargo-audit >/dev/null 2>&1 || cargo install cargo-audit --locked
+	cd app && $(CARGO) audit --ignore RUSTSEC-2026-0009
