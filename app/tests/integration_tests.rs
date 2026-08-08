@@ -45,7 +45,7 @@ async fn start_http_server(
         .expect("bind ephemeral http port");
     let addr = listener.local_addr().expect("http local addr");
     let handle = tokio::spawn(serve_http(listener, cfg));
-    (format!("http://{}", addr), handle)
+    (format!("http://{addr}"), handle)
 }
 
 async fn start_grpc_server(
@@ -59,7 +59,7 @@ async fn start_grpc_server(
         .expect("bind ephemeral grpc port");
     let addr = listener.local_addr().expect("grpc local addr");
     let handle = tokio::spawn(serve_grpc(listener, cfg));
-    (format!("http://{}", addr), handle)
+    (format!("http://{addr}"), handle)
 }
 
 /// Poll HTTP readiness endpoint until server is ready or timeout
