@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/FelipeFuhr/ffreis-rust-onnx-model-serving/compare/v1.0.2...v1.0.3) (2026-08-19)
+
+
+### Bug Fixes
+
+* **ci:** add timeout-minutes to the matrix-build job ([#97](https://github.com/FelipeFuhr/ffreis-rust-onnx-model-serving/issues/97)) ([7f6728e](https://github.com/FelipeFuhr/ffreis-rust-onnx-model-serving/commit/7f6728eddf0db28d02ea19ff0fd0329420947a71))
+
 ## [1.0.2](https://github.com/ffreis-org/ffreis-rust-onnx-model-serving/compare/v1.0.1...v1.0.2) (2026-07-16)
 
 
