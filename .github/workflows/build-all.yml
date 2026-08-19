@@ -199,6 +199,12 @@ jobs:
           egress-policy: audit
 
       - name: Fail if any dependency failed/cancelled
+        # scan-fix(gha:pr-summary-draft-skip): matrix-build/unit-tests/
+        # integration-tests/e2e-smoke/container-smoke all carry
+        # `if: draft == false`, so on every draft PR they report "skipped",
+        # not "success" — the old `!= "success"` check unconditionally
+        # failed this job on every draft PR, pre-existing on main too.
+        # "skipped" is now accepted; only failure/cancelled still fail it.
         run: |
           set -euo pipefail
           echo "matrix-build result: ${{ needs.matrix-build.result }}"
@@ -207,10 +213,15 @@ jobs:
           echo "e2e-smoke result: ${{ needs.e2e-smoke.result }}"
           echo "container-smoke result: ${{ needs.container-smoke.result }}"
 
-          if [[ "${{ needs.matrix-build.result }}" != "success" ]]; then exit 1; fi
-          if [[ "${{ needs.unit-tests.result }}" != "success" ]]; then exit 1; fi
-          if [[ "${{ needs.integration-tests.result }}" != "success" ]]; then exit 1; fi
-          if [[ "${{ needs.e2e-smoke.result }}" != "success" ]]; then exit 1; fi
-          if [[ "${{ needs.container-smoke.result }}" != "success" ]]; then exit 1; fi
+          for result in \
+            "${{ needs.matrix-build.result }}" \
+            "${{ needs.unit-tests.result }}" \
+            "${{ needs.integration-tests.result }}" \
+            "${{ needs.e2e-smoke.result }}" \
+            "${{ needs.container-smoke.result }}"; do
+            if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
+              exit 1
+            fi
+          done
 
           echo "All checks passed."
