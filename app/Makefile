@@ -165,6 +165,15 @@ coverage-check: ## Fail if coverage is below COVERAGE_MIN
 	COVERAGE_PER_FILE_MIN="$(COVERAGE_PER_FILE_MIN)" COVERAGE_FILES="$(COVERAGE_FILES)" \
 		COVERAGE_XML="$(COVERAGE_XML)" $(COVERAGE_PYTHON) "$(CHECK_COVERAGE_PER_FILE_SCRIPT)"
 
+.PHONY: build-release
+build-release: ## Build the app crate in release mode
+	$(CARGO) build $(CARGO_LOCKED) --release --verbose
+
+.PHONY: mutation
+mutation: ## Scoped mutation testing (matches CI's mutants-args -p app)
+	@which cargo-mutants >/dev/null 2>&1 || cargo install cargo-mutants --locked
+	$(CARGO) mutants -p app
+
 .PHONY: coverage-segment-check
 coverage-segment-check: ## Fail if integration/e2e coverage is below thresholds
 	command -v cargo-llvm-cov >/dev/null 2>&1 || { \
