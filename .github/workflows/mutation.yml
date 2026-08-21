@@ -16,8 +16,12 @@ jobs:
   mutation:
     permissions:
       contents: read
-    uses: FelipeFuhr/ffreis-workflows-rust/.github/workflows/rust-mutation.yml@611209c22f92a16917b4745e3fea018899234be2 # v1.3.0
+    uses: FelipeFuhr/ffreis-workflows-rust/.github/workflows/rust-mutation.yml@e2a67d8ddcc1921e9bbffadc20a54fc9dd8ad09d # v2.2.0
     with:
+      # Explicit because ffreis-workflows-rust v2.0.0 flipped this
+      # input's default to [self-hosted, local], and this repo's owner
+      # has no self-hosted runners — the job would queue forever.
+      runner: '["ubuntu-latest"]'
       working-directory: app
       # Start permissive — get a first green baseline, then raise.
       # The app crate has 64 unit + 24 async + integration + e2e tests,
