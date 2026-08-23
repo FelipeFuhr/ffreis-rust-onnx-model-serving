@@ -23,9 +23,17 @@ jobs:
       # cgroup with the build, so the agent itself gets OOM-killed mid-run.
       # Surfaces as "the self-hosted runner lost communication with the
       # server" + BlobNotFound logs — not a mutation-score failure, the job
-      # never reaches its scoring step. xl (8Gi) fits cargo-mutants' actual
-      # footprint and scales to zero when idle, same as light.
-      runner: '["self-hosted","local","xl"]'
+      # never reaches its scoring step. First correction moved this to xl
+      # (8Gi), reasoning "xl scales to zero when idle" — WRONG: xl sits at 0
+      # replicas because it is UNSCHEDULABLE, not idle. Its 8Gi pod cannot be
+      # admitted on either fleet node while light/heavy are already running
+      # (burst-node: 9.71Gi allocatable, ~4.7Gi free; local-server: 7.58Gi
+      # allocatable, ~3.6Gi free — job-arbiter only schedules a class when a
+      # single node can hold it), so the job queues forever instead of
+      # failing — worse than the OOM it replaced. heavy (3Gi) is 50%
+      # headroom over the 2Gi that OOM'd and IS schedulable alongside
+      # light/heavy on either node.
+      runner: '["self-hosted","local","heavy"]'
       working-directory: app
       # Start permissive — get a first green baseline, then raise.
       # The app crate has 64 unit + 24 async + integration + e2e tests,
